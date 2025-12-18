@@ -1,5 +1,3 @@
-# 🍳 Welcome to segger!
-
 
 # Stereo-seq SAW bin1 Quickstart
 
