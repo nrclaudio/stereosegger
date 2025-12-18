@@ -31,6 +31,30 @@
 
 ---
 
+# Stereo-seq SAW bin1 Quickstart
+
+Convert a SAW bin1 `h5ad` to Segger parquet and build a dataset with grid-based transcript graphs:
+
+```bash
+python -m segger.cli.convert_saw_h5ad_to_segger_parquet \
+  --h5ad C04895D5_tissue.h5ad \
+  --out_dir /path/to/base_dir \
+  --bin_pitch 1.0 \
+  --min_count 1
+
+python -m segger.cli.create_dataset_fast \
+  --base_dir /path/to/base_dir \
+  --data_dir /path/to/segger_dataset \
+  --sample_type saw_bin1 \
+  --tx_graph_mode grid_same_gene \
+  --grid_connectivity 8 \
+  --within_bin_edges star
+```
+
+Recommended defaults: `grid_connectivity=8`, `within_bin_edges=star` (optional), `bin_pitch=1.0` when coords are in bin units.
+
+---
+
 # Why segger?
 
 - **Highly parallelizable** – Optimized for multi-GPU environments

@@ -52,6 +52,7 @@ class Segger(nn.Module):
             heads (int)            : Number of attention heads.
         """
         super().__init__()
+        self.is_token_based = bool(is_token_based)
 
         # Initialize node embeddings
         if is_token_based:
@@ -95,6 +96,25 @@ class Segger(nn.Module):
         #     nn.Linear(out_channels, 1),
         # )
 
+    def init_node_features(self, x_dict: dict[str, Tensor]) -> dict[str, Tensor]:
+        if self.is_token_based:
+            tx_input = x_dict["tx"]
+            tx_count = None
+            if tx_input.ndim == 2 and tx_input.shape[1] == 2:
+                tx_tokens = tx_input[:, 0].long()
+                tx_count = tx_input[:, 1].float().unsqueeze(1)
+            else:
+                tx_tokens = tx_input
+            x_dict = {
+                "tx": self.node_init["tx"](tx_tokens),
+                "bd": self.node_init["bd"](x_dict["bd"]),
+            }
+            if tx_count is not None:
+                x_dict["tx"] = x_dict["tx"] * (1.0 + tx_count)
+        else:
+            x_dict = {key: self.node_init[key](x) for key, x in x_dict.items()}
+        return x_dict
+
     def forward(
         self,
         x_dict: dict[str, Tensor],
@@ -108,7 +128,7 @@ class Segger(nn.Module):
             edge_index_dict (dict[str, Tensor]): Edge indices for each edge type.
         """
 
-        x_dict = {key: self.node_init[key](x) for key, x in x_dict.items()}
+        x_dict = self.init_node_features(x_dict)
 
         x_dict = {key: F.leaky_relu(x) for key, x in x_dict.items()}
 

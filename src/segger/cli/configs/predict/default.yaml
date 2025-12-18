@@ -66,3 +66,19 @@ dist_tx:
   type: float
   default: 5
   help: Distance for transcript computation.
+tx_graph_mode:
+  type: str
+  default: "kdtree"
+  help: Strategy for transcript-transcript edges (kdtree, grid_same_gene, grid_bins).
+grid_connectivity:
+  type: int
+  default: 8
+  help: Grid connectivity (4 or 8) for grid-based transcript graphs.
+within_bin_edges:
+  type: str
+  default: "none"
+  help: Within-bin edge strategy for grid graphs.
+bin_pitch:
+  type: float
+  default: 1.0
+  help: Bin pitch for grid graph fallbacks.

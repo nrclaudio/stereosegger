@@ -49,6 +49,31 @@ help_msg = "Create Segger dataset from spatial transcriptomics data (Xenium or M
 @click.option("--val_prob", type=float, default=0.1, help="Proportion of data for use for validation split.")
 @click.option("--test_prob", type=float, default=0.2, help="Proportion of data for use for test split.")
 @click.option("--n_workers", type=int, default=1, help="Number of workers for parallel processing.")
+@click.option(
+    "--tx_graph_mode",
+    type=click.Choice(["kdtree", "grid_same_gene", "grid_bins"], case_sensitive=False),
+    default="kdtree",
+    help="Strategy for transcript-transcript edges.",
+)
+@click.option(
+    "--grid_connectivity",
+    type=int,
+    default=8,
+    help="Grid connectivity (4 or 8) for grid-based transcript graphs.",
+)
+@click.option(
+    "--within_bin_edges",
+    type=click.Choice(["none", "star"], case_sensitive=False),
+    default="none",
+    help="Within-bin edge strategy for grid graphs.",
+)
+@click.option("--bin_pitch", type=float, default=1.0, help="Bin pitch for grid graph fallbacks.")
+@click.option(
+    "--allow_missing_boundaries",
+    is_flag=True,
+    default=False,
+    help="Allow dataset creation without boundaries (prediction-only mode).",
+)
 def create_dataset(args: Namespace):
 
     # Setup logging
@@ -83,6 +108,11 @@ def create_dataset(args: Namespace):
         dist_bd=args.dist_bd,
         k_tx=args.k_tx,
         dist_tx=args.dist_tx,
+        tx_graph_mode=args.tx_graph_mode,
+        grid_connectivity=args.grid_connectivity,
+        within_bin_edges=args.within_bin_edges,
+        bin_pitch=args.bin_pitch,
+        allow_missing_boundaries=args.allow_missing_boundaries,
         tile_size=args.tile_size,
         tile_width=args.tile_width,
         tile_height=args.tile_height,

@@ -1,6 +1,7 @@
 import os
 import shapely
 from pyarrow import parquet as pq, compute as pc
+from pyarrow import types as pa_types
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -18,6 +19,7 @@ import torch
 from pqdm.threads import pqdm
 import random
 from segger.data.parquet.transcript_embedding import TranscriptEmbedding
+from segger.data.tx_graph import build_grid_same_gene_edge_index, build_grid_bin_edge_index
 
 
 # TODO: Add documentation for settings
@@ -63,6 +65,7 @@ class STSampleParquet:
         boundaries_fn = self.settings.boundaries.filename
         self._boundaries_filepath = self._base_dir / boundaries_fn
         self.n_workers = n_workers
+        self.allow_missing_boundaries = False
 
         # Setup logging
         logging.basicConfig(level=logging.INFO)
@@ -171,15 +174,19 @@ class STSampleParquet:
             # Get filtered unique feature names
             table = pq.read_table(self._transcripts_filepath)
             names = pc.unique(table[self.settings.transcripts.label])
+            filter_substrings = getattr(self.settings.transcripts, "filter_substrings", [])
             if self._emb_genes is not None:
                 # Filter substring is extended with the genes missing in the embedding
                 names_str = [x.decode("utf-8") if isinstance(x, bytes) else x for x in names.to_pylist()]
                 missing_genes = list(set(names_str) - set(self._emb_genes))
                 logging.warning(f"Number of missing genes: {len(missing_genes)}")
-                self.settings.transcripts.filter_substrings.extend(missing_genes)
-            pattern = "|".join(self.settings.transcripts.filter_substrings)
-            mask = pc.invert(pc.match_substring_regex(names, pattern))
-            filtered_names = pc.filter(names, mask).to_pylist()
+                filter_substrings.extend(missing_genes)
+            if filter_substrings and (pa_types.is_string(names.type) or pa_types.is_binary(names.type)):
+                pattern = "|".join(filter_substrings)
+                mask = pc.invert(pc.match_substring_regex(names, pattern))
+                filtered_names = pc.filter(names, mask).to_pylist()
+            else:
+                filtered_names = names.to_pylist()
             metadata["feature_names"] = [x.decode("utf-8") if isinstance(x, bytes) else x for x in filtered_names]
             self._transcripts_metadata = metadata
         return self._transcripts_metadata
@@ -233,11 +240,23 @@ class STSampleParquet:
             # Get individual extents
             xy = self.settings.transcripts.xy
             tx_extents = utils.get_xy_extents(self._transcripts_filepath, *xy)
-            xy = self.settings.boundaries.xy
-            bd_extents = utils.get_xy_extents(self._boundaries_filepath, *xy)
+            bd_extents = None
+            geometry_col = getattr(self.settings.boundaries, "geometry", None)
+            if self._boundaries_filepath.exists():
+                if geometry_col:
+                    boundaries = gpd.read_parquet(self._boundaries_filepath, columns=[geometry_col])
+                    if len(boundaries) > 0:
+                        bd_bounds = boundaries.geometry.total_bounds
+                        bd_extents = shapely.box(*bd_bounds)
+                else:
+                    xy = self.settings.boundaries.xy
+                    bd_extents = utils.get_xy_extents(self._boundaries_filepath, *xy)
+            elif not self.allow_missing_boundaries:
+                msg = f"Boundaries file not found at {self._boundaries_filepath}."
+                raise FileNotFoundError(msg)
 
             # Combine extents and get bounding box
-            extents = tx_extents.union(bd_extents)
+            extents = tx_extents if bd_extents is None else tx_extents.union(bd_extents)
             self._extents = shapely.box(*extents.bounds)
 
         return self._extents
@@ -258,14 +277,22 @@ class STSampleParquet:
         if self.n_workers == 1:
             return [self.extents]
 
-        # Otherwise, split based on boundary distribution which is much smaller
-        # than transcripts DataFrame.
-        # Note: Assumes boundaries are distributed similarly to transcripts at
-        # a coarse level.
-        data = pd.read_parquet(
-            self._boundaries_filepath,
-            columns=self.settings.boundaries.xy,
-        ).values
+        geometry_col = getattr(self.settings.boundaries, "geometry", None)
+        use_boundaries = self._boundaries_filepath.exists() and not self.allow_missing_boundaries and not geometry_col
+        if use_boundaries:
+            # Otherwise, split based on boundary distribution which is much smaller
+            # than transcripts DataFrame.
+            # Note: Assumes boundaries are distributed similarly to transcripts at
+            # a coarse level.
+            data = pd.read_parquet(
+                self._boundaries_filepath,
+                columns=self.settings.boundaries.xy,
+            ).values
+        else:
+            data = pd.read_parquet(
+                self._transcripts_filepath,
+                columns=self.settings.transcripts.xy,
+            ).values
         ndtree = NDTree(data, self.n_workers)
 
         return ndtree.boxes
@@ -335,6 +362,11 @@ class STSampleParquet:
         dist_bd: float = 15.0,
         k_tx: int = 3,
         dist_tx: float = 5.0,
+        tx_graph_mode: str = "kdtree",
+        grid_connectivity: int = 8,
+        within_bin_edges: str = "none",
+        bin_pitch: float = 1.0,
+        allow_missing_boundaries: bool = False,
         tile_size: Optional[int] = None,
         tile_width: Optional[float] = None,
         tile_height: Optional[float] = None,
@@ -401,13 +433,16 @@ class STSampleParquet:
             self.logger.error(str(e), exc_info=True)
             raise e
 
+        self.allow_missing_boundaries = allow_missing_boundaries
+        self._extents = None
+
         # Setup directory structure to save tiles
         data_dir = Path(data_dir)
         STSampleParquet._setup_directory(data_dir)
 
         # Function to parallelize over workers
         def func(region):
-            xm = STInMemoryDataset(sample=self, extents=region)
+            xm = STInMemoryDataset(sample=self, extents=region, allow_missing_boundaries=allow_missing_boundaries)
             tiles = xm._tile(tile_width, tile_height, tile_size)
             if frac < 1:
                 tiles = random.sample(tiles, int(len(tiles) * frac))
@@ -423,6 +458,10 @@ class STSampleParquet:
                     dist_bd=dist_bd,
                     k_tx=k_tx,
                     dist_tx=dist_tx,
+                    tx_graph_mode=tx_graph_mode,
+                    grid_connectivity=grid_connectivity,
+                    within_bin_edges=within_bin_edges,
+                    bin_pitch=bin_pitch,
                     neg_sampling_ratio=neg_sampling_ratio,
                 )
                 if pyg_data is not None:
@@ -481,6 +520,7 @@ class STInMemoryDataset:
         sample: STSampleParquet,
         extents: shapely.Polygon,
         margin: int = 10,
+        allow_missing_boundaries: bool = False,
     ):
         """
         Initializes the STInMemoryDataset instance by loading transcripts
@@ -501,6 +541,7 @@ class STInMemoryDataset:
         self.extents = extents
         self.margin = margin
         self.settings = self.sample.settings
+        self.allow_missing_boundaries = allow_missing_boundaries
 
         # Load data from parquet files
         self._load_transcripts(self.sample._transcripts_filepath)
@@ -561,6 +602,30 @@ class STInMemoryDataset:
         ValueError
             If the boundaries dataframe cannot be loaded or filtered.
         """
+        if not Path(path).exists():
+            if self.allow_missing_boundaries:
+                geometry_col = getattr(self.settings.boundaries, "geometry", None)
+                columns = getattr(self.settings.boundaries, "columns", [])
+                if geometry_col:
+                    boundaries = gpd.GeoDataFrame(columns=columns, geometry=geometry_col)
+                else:
+                    boundaries = pd.DataFrame(columns=columns)
+                self.boundaries = boundaries
+                return
+            msg = f"Boundaries file not found at {path}."
+            raise FileNotFoundError(msg)
+
+        geometry_col = getattr(self.settings.boundaries, "geometry", None)
+        if geometry_col:
+            boundaries = gpd.read_parquet(path, columns=self.settings.boundaries.columns)
+            if not isinstance(boundaries, gpd.GeoDataFrame):
+                boundaries = gpd.GeoDataFrame(boundaries, geometry=geometry_col)
+            outset = self.extents.buffer(self.margin, join_style="mitre")
+            if len(boundaries) > 0:
+                boundaries = boundaries[boundaries.geometry.intersects(outset)]
+            self.boundaries = boundaries
+            return
+
         # Load and filter boundaries dataframe
         outset = self.extents.buffer(self.margin, join_style="mitre")
         boundaries = utils.read_parquet_region(
@@ -838,6 +903,14 @@ class STTile:
             A DataFrame containing the filtered boundaries within the tile
             extents.
         """
+        geometry_col = getattr(self.settings.boundaries, "geometry", None)
+        if geometry_col:
+            boundaries = self.dataset.boundaries
+            if len(boundaries) == 0:
+                return boundaries
+            outset = self.extents.buffer(self.margin, join_style="mitre")
+            return boundaries[boundaries.geometry.intersects(outset)]
+
         filtered_boundaries = utils.filter_boundaries(
             boundaries=self.dataset.boundaries,
             inset=self.extents,
@@ -872,7 +945,7 @@ class STTile:
 
         return filtered_transcripts
 
-    def get_transcript_props(self) -> torch.Tensor:
+    def get_transcript_props(self) -> tuple[torch.Tensor, bool]:
         """
         Encodes transcript features in a sparse format.
 
@@ -880,6 +953,8 @@ class STTile:
         -------
         props : torch.Tensor
             A sparse tensor containing the encoded transcript features.
+        token_based : bool
+            Whether the transcript features are token-based.
 
         Notes
         -----
@@ -892,8 +967,17 @@ class STTile:
         embedding = self.dataset.sample._transcript_embedding
         label = self.settings.transcripts.label
         props = embedding.embed(self.transcripts[label])
+        token_based = props.ndim == 1
 
-        return props
+        count_col = getattr(self.settings.transcripts, "count", None)
+        if count_col and count_col in self.transcripts.columns:
+            counts = torch.as_tensor(np.log1p(self.transcripts[count_col].values), dtype=torch.float32).unsqueeze(1)
+            if token_based:
+                props = torch.stack([props.to(torch.float32), counts.squeeze(1)], dim=1)
+            else:
+                props = torch.cat([props.float(), counts], dim=1)
+
+        return props, token_based
 
     @staticmethod
     def get_polygon_props(
@@ -1019,12 +1103,19 @@ class STTile:
         of the code.
         """
         # Get polygons from coordinates
-        polygons = utils.get_polygons_from_xy(
-            self.boundaries,
-            x=self.settings.boundaries.x,
-            y=self.settings.boundaries.y,
-            label=self.settings.boundaries.label,
-        )
+        geometry_col = getattr(self.settings.boundaries, "geometry", None)
+        if geometry_col:
+            if isinstance(self.boundaries, gpd.GeoDataFrame):
+                polygons = self.boundaries.set_geometry(geometry_col).geometry
+            else:
+                polygons = gpd.GeoSeries(self.boundaries[geometry_col])
+        else:
+            polygons = utils.get_polygons_from_xy(
+                self.boundaries,
+                x=self.settings.boundaries.x,
+                y=self.settings.boundaries.y,
+                label=self.settings.boundaries.label,
+            )
         # Geometric properties of polygons
         props = self.get_polygon_props(polygons)
         props = torch.as_tensor(props.values).float()
@@ -1039,6 +1130,10 @@ class STTile:
         dist_bd: float = 15,
         k_tx: int = 3,
         dist_tx: float = 5,
+        tx_graph_mode: str = "kdtree",
+        grid_connectivity: int = 8,
+        within_bin_edges: str = "none",
+        bin_pitch: float = 1.0,
         area: bool = True,
         convexity: bool = True,
         elongation: bool = True,
@@ -1138,24 +1233,113 @@ class STTile:
         # Initialize an empty HeteroData object
         pyg_data = HeteroData()
 
-        # Set up Transcript nodes
-        pyg_data["tx"].id = torch.tensor(
-            self.transcripts[self.settings.transcripts.id].values.astype(int),
-            dtype=torch.long,
-        )
-        pyg_data["tx"].pos = torch.tensor(
-            self.transcripts[self.settings.transcripts.xyz].values,
-            dtype=torch.float32,
-        )
-        pyg_data["tx"].x = self.get_transcript_props()
+        tx_graph_mode = tx_graph_mode.lower()
+        within_bin_edges = within_bin_edges.lower()
 
-        # Set up Transcript-Transcript neighbor edges
-        nbrs_edge_idx = self.get_kdtree_edge_index(
-            self.transcripts[self.settings.transcripts.xyz],
-            self.transcripts[self.settings.transcripts.xyz],
-            k=k_tx,
-            max_distance=dist_tx,
-        )
+        geometry_col = getattr(self.settings.boundaries, "geometry", None)
+        tx_positions = None
+
+        if tx_graph_mode == "grid_bins":
+            bx_col = getattr(self.settings.transcripts, "bx", None)
+            by_col = getattr(self.settings.transcripts, "by", None)
+            if not bx_col or not by_col or bx_col not in self.transcripts.columns or by_col not in self.transcripts.columns:
+                raise ValueError("tx_graph_mode='grid_bins' requires 'bx' and 'by' columns in transcripts.")
+
+            grouped = self.transcripts.groupby([bx_col, by_col], sort=False)
+            count_col = getattr(self.settings.transcripts, "count", None)
+            if count_col and count_col in self.transcripts.columns:
+                total_count = grouped[count_col].sum()
+            else:
+                total_count = grouped.size()
+            gene_col = self.settings.transcripts.label
+            if gene_col in self.transcripts.columns:
+                n_genes = grouped[gene_col].nunique()
+            else:
+                n_genes = grouped.size()
+
+            x_col = self.settings.transcripts.x
+            y_col = self.settings.transcripts.y
+            bins = np.array(grouped.size().index.tolist(), dtype=int)
+            if x_col in self.transcripts.columns and y_col in self.transcripts.columns:
+                bin_x = grouped[x_col].mean().values
+                bin_y = grouped[y_col].mean().values
+            else:
+                bin_x = bins[:, 0] * bin_pitch
+                bin_y = bins[:, 1] * bin_pitch
+
+            tx_positions = np.stack([bin_x, bin_y], axis=1)
+            tx_features = np.stack([np.log1p(total_count.values), np.log1p(n_genes.values)], axis=1)
+
+            pyg_data["tx"].id = torch.arange(tx_features.shape[0], dtype=torch.long)
+            pyg_data["tx"].pos = torch.tensor(tx_positions, dtype=torch.float32)
+            pyg_data["tx"].x = torch.tensor(tx_features, dtype=torch.float32)
+            pyg_data["tx"].token_based = torch.tensor(False)
+            pyg_data["tx"].bx = torch.tensor(bins[:, 0], dtype=torch.long)
+            pyg_data["tx"].by = torch.tensor(bins[:, 1], dtype=torch.long)
+
+            nbrs_edge_idx, _ = build_grid_bin_edge_index(bins[:, 0], bins[:, 1], connectivity=grid_connectivity)
+        else:
+            # Set up Transcript nodes
+            pyg_data["tx"].id = torch.tensor(
+                self.transcripts[self.settings.transcripts.id].values.astype(int),
+                dtype=torch.long,
+            )
+            tx_positions = self.transcripts[self.settings.transcripts.xyz].values
+            pyg_data["tx"].pos = torch.tensor(
+                tx_positions,
+                dtype=torch.float32,
+            )
+            tx_props, token_based = self.get_transcript_props()
+            pyg_data["tx"].x = tx_props
+            pyg_data["tx"].token_based = torch.tensor(token_based)
+
+            bx_col = getattr(self.settings.transcripts, "bx", None)
+            by_col = getattr(self.settings.transcripts, "by", None)
+            if bx_col in self.transcripts.columns and by_col in self.transcripts.columns:
+                pyg_data["tx"].bx = torch.tensor(self.transcripts[bx_col].values.astype(int), dtype=torch.long)
+                pyg_data["tx"].by = torch.tensor(self.transcripts[by_col].values.astype(int), dtype=torch.long)
+
+            gene_id_col = getattr(self.settings.transcripts, "gene_id", None)
+            if gene_id_col in self.transcripts.columns:
+                pyg_data["tx"].gene_id = torch.tensor(
+                    self.transcripts[gene_id_col].values.astype(int),
+                    dtype=torch.long,
+                )
+            else:
+                label_col = self.settings.transcripts.label
+                if pd.api.types.is_numeric_dtype(self.transcripts[label_col]):
+                    pyg_data["tx"].gene_id = torch.tensor(
+                        self.transcripts[label_col].values.astype(int),
+                        dtype=torch.long,
+                    )
+
+            # Set up Transcript-Transcript neighbor edges
+            if tx_graph_mode == "kdtree":
+                nbrs_edge_idx = self.get_kdtree_edge_index(
+                    self.transcripts[self.settings.transcripts.xyz],
+                    self.transcripts[self.settings.transcripts.xyz],
+                    k=k_tx,
+                    max_distance=dist_tx,
+                )
+            elif tx_graph_mode == "grid_same_gene":
+                if not hasattr(pyg_data["tx"], "gene_id"):
+                    raise ValueError("tx_graph_mode='grid_same_gene' requires numeric gene_id values.")
+                if hasattr(pyg_data["tx"], "bx") and hasattr(pyg_data["tx"], "by"):
+                    bx = pyg_data["tx"].bx.cpu().numpy()
+                    by = pyg_data["tx"].by.cpu().numpy()
+                else:
+                    coords = tx_positions[:, :2]
+                    bx = np.rint(coords[:, 0] / bin_pitch).astype(int)
+                    by = np.rint(coords[:, 1] / bin_pitch).astype(int)
+                nbrs_edge_idx = build_grid_same_gene_edge_index(
+                    pyg_data["tx"].gene_id.cpu().numpy(),
+                    bx,
+                    by,
+                    connectivity=grid_connectivity,
+                    within_bin_edges=within_bin_edges,
+                )
+            else:
+                raise ValueError(f"Unknown tx_graph_mode: {tx_graph_mode}")
 
         # If there are no tx-neighbors-tx edges, skip saving tile
         if nbrs_edge_idx.shape[1] == 0:
@@ -1165,12 +1349,28 @@ class STTile:
         pyg_data["tx", "neighbors", "tx"].edge_index = nbrs_edge_idx
 
         # Set up Boundary nodes
-        polygons = utils.get_polygons_from_xy(
-            self.boundaries,
-            self.settings.boundaries.x,
-            self.settings.boundaries.y,
-            self.settings.boundaries.label,
-        )
+        if len(self.boundaries) == 0:
+            bd_feature_count = sum([area, convexity, elongation, circularity])
+            pyg_data["bd"].id = np.array([], dtype=int)
+            pyg_data["bd"].pos = torch.empty((0, 2), dtype=torch.float32)
+            pyg_data["bd"].x = torch.empty((0, bd_feature_count), dtype=torch.float32)
+            pyg_data["tx", "neighbors", "bd"].edge_index = torch.empty((2, 0), dtype=torch.long)
+            pyg_data["tx", "belongs", "bd"].edge_index = torch.empty((2, 0), dtype=torch.long)
+            return pyg_data
+
+        if geometry_col:
+            if isinstance(self.boundaries, gpd.GeoDataFrame):
+                polygons = self.boundaries.set_geometry(geometry_col).geometry
+            else:
+                polygons = gpd.GeoSeries(self.boundaries[geometry_col])
+            polygons.index = self.boundaries[self.settings.boundaries.id].values
+        else:
+            polygons = utils.get_polygons_from_xy(
+                self.boundaries,
+                self.settings.boundaries.x,
+                self.settings.boundaries.y,
+                self.settings.boundaries.label,
+            )
         centroids = polygons.centroid.get_coordinates()
         pyg_data["bd"].id = polygons.index.to_numpy()
         pyg_data["bd"].pos = torch.tensor(centroids.values, dtype=torch.float32)
@@ -1180,7 +1380,7 @@ class STTile:
         dist = np.sqrt(polygons.area.max()) * 10  # heuristic distance
         nbrs_edge_idx = self.get_kdtree_edge_index(
             centroids,
-            self.transcripts[self.settings.transcripts.xy],
+            tx_positions[:, :2],
             k=k_bd,
             max_distance=dist,
         )
@@ -1195,10 +1395,25 @@ class STTile:
         # Now we identify and split the tx-belongs-bd edges
         edge_type = ("tx", "belongs", "bd")
 
+        nuclear_col = getattr(self.settings.transcripts, "nuclear", None)
+        boundary_id_col = getattr(self.settings.boundaries, "id", None)
+        can_build_labels = (
+            tx_graph_mode != "grid_bins"
+            and
+            nuclear_col
+            and boundary_id_col
+            and nuclear_col in self.transcripts.columns
+            and boundary_id_col in self.transcripts.columns
+        )
+
+        if not can_build_labels:
+            pyg_data[edge_type].edge_index = nbrs_edge_idx
+            return pyg_data
+
         # Find nuclear transcripts
-        tx_cell_ids = self.transcripts[self.settings.boundaries.id]
+        tx_cell_ids = self.transcripts[boundary_id_col]
         cell_ids_map = {idx: i for (i, idx) in enumerate(polygons.index)}
-        is_nuclear = self.transcripts[self.settings.transcripts.nuclear].astype(bool)
+        is_nuclear = self.transcripts[nuclear_col].astype(bool)
         is_nuclear &= tx_cell_ids.isin(polygons.index)
 
         # Set up overlap edges

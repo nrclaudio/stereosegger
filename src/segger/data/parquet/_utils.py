@@ -278,9 +278,11 @@ def filter_transcripts(
         The filtered dataframe.
     """
     mask = pd.Series(True, index=transcripts_df.index)
-    if filter_substrings is not None and label is not None:
-        mask &= ~transcripts_df[label].str.startswith(tuple(filter_substrings))
-    if min_qv is not None:
+    if filter_substrings and label is not None and label in transcripts_df.columns:
+        series = transcripts_df[label]
+        if pd.api.types.is_string_dtype(series) or series.dtype == object:
+            mask &= ~series.str.startswith(tuple(filter_substrings))
+    if min_qv is not None and "qv" in transcripts_df.columns:
         mask &= transcripts_df["qv"].ge(min_qv)
     return transcripts_df[mask]
 

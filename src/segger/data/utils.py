@@ -504,6 +504,13 @@ def coo_to_dense_adj(
         )
         raise ValueError(msg)
 
+    if edge_index.numel() == 0:
+        if num_nodes is None:
+            num_nodes = 0
+        if num_nbrs is None:
+            num_nbrs = 0
+        return torch.full((num_nodes, num_nbrs), -1, dtype=torch.long)
+
     # Get split points
     uniques, counts = torch.unique(edge_index[0], return_counts=True)
     if num_nodes is None:

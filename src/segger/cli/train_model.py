@@ -77,11 +77,22 @@ def train_model(args: Namespace):
         ls = load_model(args.pretrained_model_dir / "lightning_logs" / f"version_{args.model_version}" / "checkpoints")
     else:
         logging.info("Creating new model...")
-        is_token_based = dm.train[0].x_dict["tx"].ndim == 1
+        token_flag = getattr(dm.train[0]["tx"], "token_based", None)
+        if token_flag is not None:
+            if torch.is_tensor(token_flag):
+                is_token_based = bool(token_flag.item())
+            else:
+                is_token_based = bool(token_flag)
+        else:
+            is_token_based = dm.train[0].x_dict["tx"].ndim == 1
         if is_token_based:
             # if the model is token-based, the input is a 1D tensor of token indices
-            assert dm.train[0].x_dict["tx"].ndim == 1
-            assert dm.train[0].x_dict["tx"].dtype == torch.long
+            tx_x = dm.train[0].x_dict["tx"]
+            assert tx_x.ndim in (1, 2)
+            if tx_x.ndim == 1:
+                assert tx_x.dtype == torch.long
+            else:
+                assert tx_x.shape[1] == 2
             num_tx_features = args.num_tx_tokens
             print("Using token-based embeddings as node features, number of tokens: ", num_tx_features)
         else:

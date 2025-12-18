@@ -19,6 +19,7 @@ from segger.data.utils import (
     create_anndata,
     coo_to_dense_adj,
 )
+from segger.data.tx_graph import build_grid_same_gene_edge_index, build_grid_bin_edge_index
 from segger.training.train import LitSegger
 from segger.training.segger_data_module import SeggerDataModule
 from segger.prediction.boundary import generate_boundaries
@@ -189,6 +190,10 @@ def get_similarity_scores(
     receptive_field: dict,
     compute_sigmoid: bool = True,
     knn_method: str = "kd_tree",
+    tx_graph_mode: str = "kdtree",
+    grid_connectivity: int = 8,
+    within_bin_edges: str = "none",
+    bin_pitch: float = 1.0,
     gpu_id: int = 0,  # Added argument for GPU ID
 ) -> coo_matrix:
     """
@@ -208,6 +213,9 @@ def get_similarity_scores(
                     'from_type' and 'to_type' nodes.
     """
 
+    tx_graph_mode = tx_graph_mode.lower()
+    within_bin_edges = within_bin_edges.lower()
+
     # Set the specified GPU device for CuPy operations
     with cp.cuda.Device(gpu_id):
         # Move the batch to the specified GPU
@@ -216,37 +224,70 @@ def get_similarity_scores(
         # Step 1: Get embeddings from the model (on GPU)
         shape = batch[from_type].x.shape[0], batch[to_type].x.shape[0]
 
-        if from_type == to_type:
-            coords_1 = coords_2 = batch[to_type].pos
-        else:
-            coords_1 = batch[to_type].pos[:, :2]  # 'tx' positions
-            coords_2 = batch[from_type].pos[:, :2]
-        if knn_method == "kd_tree":
-            # Compute edge indices using knn method (still on GPU)
-            edge_index = get_edge_index(
-                coords_1.cpu(),
-                coords_2.cpu(),
-                k=receptive_field[f"k_{to_type}"],
-                dist=receptive_field[f"dist_{to_type}"],
-                method=knn_method,
-            )
-        else:
-            edge_index = get_edge_index(
-                coords_1,
-                coords_2,
-                k=receptive_field[f"k_{to_type}"],
-                dist=receptive_field[f"dist_{to_type}"],
-                method=knn_method,
-            )
+        if from_type == to_type and tx_graph_mode != "kdtree":
+            if tx_graph_mode == "grid_same_gene":
+                if not hasattr(batch["tx"], "gene_id"):
+                    raise ValueError("tx_graph_mode='grid_same_gene' requires 'tx.gene_id' in the batch.")
+                if not hasattr(batch["tx"], "bx") or not hasattr(batch["tx"], "by"):
+                    coords = batch["tx"].pos[:, :2].cpu().numpy()
+                    bx = np.rint(coords[:, 0] / bin_pitch).astype(int)
+                    by = np.rint(coords[:, 1] / bin_pitch).astype(int)
+                else:
+                    bx = batch["tx"].bx.cpu().numpy()
+                    by = batch["tx"].by.cpu().numpy()
+                gene_ids = batch["tx"].gene_id.cpu().numpy()
+                edge_index = build_grid_same_gene_edge_index(
+                    gene_ids,
+                    bx,
+                    by,
+                    connectivity=grid_connectivity,
+                    within_bin_edges=within_bin_edges,
+                )
+            elif tx_graph_mode == "grid_bins":
+                if not hasattr(batch["tx"], "bx") or not hasattr(batch["tx"], "by"):
+                    coords = batch["tx"].pos[:, :2].cpu().numpy()
+                    bx = np.rint(coords[:, 0] / bin_pitch).astype(int)
+                    by = np.rint(coords[:, 1] / bin_pitch).astype(int)
+                else:
+                    bx = batch["tx"].bx.cpu().numpy()
+                    by = batch["tx"].by.cpu().numpy()
+                edge_index, _ = build_grid_bin_edge_index(bx, by, connectivity=grid_connectivity)
+            else:
+                raise ValueError(f"Unknown tx_graph_mode: {tx_graph_mode}")
 
-        # Convert to dense adjacency matrix (on GPU)
-        edge_index = coo_to_dense_adj(edge_index.T, num_nodes=shape[0], num_nbrs=receptive_field[f"k_{to_type}"])
+            edge_index = coo_to_dense_adj(edge_index, num_nodes=shape[0], num_nbrs=None)
+        else:
+            if from_type == to_type:
+                coords_1 = coords_2 = batch[to_type].pos
+            else:
+                coords_1 = batch[to_type].pos[:, :2]  # 'tx' positions
+                coords_2 = batch[from_type].pos[:, :2]
+            if knn_method == "kd_tree":
+                # Compute edge indices using knn method (still on GPU)
+                edge_index = get_edge_index(
+                    coords_1.cpu(),
+                    coords_2.cpu(),
+                    k=receptive_field[f"k_{to_type}"],
+                    dist=receptive_field[f"dist_{to_type}"],
+                    method=knn_method,
+                )
+            else:
+                edge_index = get_edge_index(
+                    coords_1,
+                    coords_2,
+                    k=receptive_field[f"k_{to_type}"],
+                    dist=receptive_field[f"dist_{to_type}"],
+                    method=knn_method,
+                )
+
+            # Convert to dense adjacency matrix (on GPU)
+            edge_index = coo_to_dense_adj(edge_index.T, num_nodes=shape[0], num_nbrs=receptive_field[f"k_{to_type}"])
 
         with torch.no_grad():
             if from_type != to_type:
                 embeddings = model(batch.x_dict, batch.edge_index_dict)
             else:  # to go with the inital embeddings for tx-tx
-                embeddings = {key: model.node_init[key](x) for key, x in batch.x_dict.items()}
+                embeddings = model.init_node_features(batch.x_dict)
                 norms = embeddings[to_type].norm(dim=1, keepdim=True)
                 # Avoid division by zero in case there are zero vectors
                 norms = torch.where(norms == 0, torch.ones_like(norms), norms)
@@ -291,6 +332,10 @@ def predict_batch(
     receptive_field: Dict[str, float],
     use_cc: bool = True,
     knn_method: str = "cuda",
+    tx_graph_mode: str = "kdtree",
+    grid_connectivity: int = 8,
+    within_bin_edges: str = "none",
+    bin_pitch: float = 1.0,
     edge_index_save_path: Union[str, Path] = None,
     output_ddf_save_path: Union[str, Path] = None,
     gpu_id: int = 0,  # Added argument for GPU ID
@@ -331,7 +376,17 @@ def predict_batch(
         if len(batch["bd"].pos) >= 10 and len(batch["tx"].pos) >= 1000:
             # Step 1: Compute similarity scores between 'tx' (transcripts) and 'bd' (boundaries)
             scores = get_similarity_scores(
-                lit_segger.model, batch, "tx", "bd", receptive_field, knn_method=knn_method, gpu_id=gpu_id
+                lit_segger.model,
+                batch,
+                "tx",
+                "bd",
+                receptive_field,
+                knn_method=knn_method,
+                tx_graph_mode=tx_graph_mode,
+                grid_connectivity=grid_connectivity,
+                within_bin_edges=within_bin_edges,
+                bin_pitch=bin_pitch,
+                gpu_id=gpu_id,
             )
             torch.cuda.empty_cache()
 
@@ -365,6 +420,10 @@ def predict_batch(
                     receptive_field,
                     compute_sigmoid=False,
                     knn_method=knn_method,
+                    tx_graph_mode=tx_graph_mode,
+                    grid_connectivity=grid_connectivity,
+                    within_bin_edges=within_bin_edges,
+                    bin_pitch=bin_pitch,
                     gpu_id=gpu_id,
                 )
 
@@ -373,43 +432,44 @@ def predict_batch(
                     (scores_tx.data, (scores_tx.row, scores_tx.col)), shape=scores_tx.shape
                 )
 
-                score_cut_tx = np.median(no_id_scores.data)
+                if no_id_scores.data.size > 0:
+                    score_cut_tx = np.median(no_id_scores.data)
 
-                # Apply threshold on GPU
-                no_id_scores.data[no_id_scores.data < score_cut_tx] = 0  # Apply threshold
+                    # Apply threshold on GPU
+                    no_id_scores.data[no_id_scores.data < score_cut_tx] = 0  # Apply threshold
 
-                # Zero out the diagonal on GPU
-                no_id_scores = zero_out_diagonal_gpu(no_id_scores)
-                no_id_scores.eliminate_zeros()  # Remove zero entries to keep the matrix sparse
+                    # Zero out the diagonal on GPU
+                    no_id_scores = zero_out_diagonal_gpu(no_id_scores)
+                    no_id_scores.eliminate_zeros()  # Remove zero entries to keep the matrix sparse
 
-                # Find unassigned transcripts (those with no segger_cell_id)
-                no_id = cp.where(cp.asarray(assignments["segger_cell_id"] == None))[
-                    0
-                ]  # Using CuPy to handle None values
+                    # Find unassigned transcripts (those with no segger_cell_id)
+                    no_id = cp.where(cp.asarray(assignments["segger_cell_id"] == None))[
+                        0
+                    ]  # Using CuPy to handle None values
 
-                if len(no_id) > 0:  # Only compute if there are unassigned transcripts
-                    # Apply score cut-off to unassigned transcripts
-                    no_id_scores = subset_sparse_matrix(no_id_scores, no_id, no_id)
-                    no_id_scores.data[no_id_scores.data < score_cut] = 0  # Apply threshold
-                    no_id_scores.eliminate_zeros()  # Clean up zeros
+                    if len(no_id) > 0:  # Only compute if there are unassigned transcripts
+                        # Apply score cut-off to unassigned transcripts
+                        no_id_scores = subset_sparse_matrix(no_id_scores, no_id, no_id)
+                        no_id_scores.data[no_id_scores.data < score_cut] = 0  # Apply threshold
+                        no_id_scores.eliminate_zeros()  # Clean up zeros
 
-                    # Find the non-zero entries in the no_id_scores to construct edge_index
-                    non_zero_rows, non_zero_cols, _ = find(no_id_scores)
-                    unassigned_ids = transcript_id[no_id.get()]  # Unassigned transcript IDs
+                        # Find the non-zero entries in the no_id_scores to construct edge_index
+                        non_zero_rows, non_zero_cols, _ = find(no_id_scores)
+                        unassigned_ids = transcript_id[no_id.get()]  # Unassigned transcript IDs
 
-                    # Construct edge index (source, target) based on non-zero connections in no_id_scores
-                    source_nodes = unassigned_ids[non_zero_rows.get()]
-                    target_nodes = unassigned_ids[non_zero_cols.get()]
+                        # Construct edge index (source, target) based on non-zero connections in no_id_scores
+                        source_nodes = unassigned_ids[non_zero_rows.get()]
+                        target_nodes = unassigned_ids[non_zero_cols.get()]
 
-                    # # Save edge_index using CuDF and Dask-CuDF for GPU acceleration
-                    edge_index_ddf = delayed(dd.from_pandas)(
-                        pd.DataFrame({"source": source_nodes, "target": target_nodes}), npartitions=1
-                    )
-                    # Use delayed for asynchronous disk writing of edge_index in Dask DataFrame
-                    delayed_write_edge_index = delayed(edge_index_ddf.to_parquet)(
-                        edge_index_save_path, append=True, ignore_divisions=True
-                    )
-                    delayed_write_edge_index.persist()  # Schedule writing
+                        # # Save edge_index using CuDF and Dask-CuDF for GPU acceleration
+                        edge_index_ddf = delayed(dd.from_pandas)(
+                            pd.DataFrame({"source": source_nodes, "target": target_nodes}), npartitions=1
+                        )
+                        # Use delayed for asynchronous disk writing of edge_index in Dask DataFrame
+                        delayed_write_edge_index = delayed(edge_index_ddf.to_parquet)(
+                            edge_index_save_path, append=True, ignore_divisions=True
+                        )
+                        delayed_write_edge_index.persist()  # Schedule writing
 
             assignments = {
                 "transcript_id": assignments["transcript_id"].astype("str"),
@@ -432,6 +492,73 @@ def predict_batch(
             # Free memory after computation
             cp.get_default_memory_pool().free_all_blocks()  # Free CuPy memory
             torch.cuda.empty_cache()
+        else:
+            assignments["score"] = np.zeros(len(transcript_id), dtype=np.float32)
+            assignments["segger_cell_id"] = np.array([None] * len(transcript_id), dtype=object)
+            assignments["bound"] = np.zeros(len(transcript_id), dtype=np.int8)
+
+            if use_cc and len(transcript_id) > 0:
+                scores_tx = get_similarity_scores(
+                    lit_segger.model,
+                    batch,
+                    "tx",
+                    "tx",
+                    receptive_field,
+                    compute_sigmoid=False,
+                    knn_method=knn_method,
+                    tx_graph_mode=tx_graph_mode,
+                    grid_connectivity=grid_connectivity,
+                    within_bin_edges=within_bin_edges,
+                    bin_pitch=bin_pitch,
+                    gpu_id=gpu_id,
+                )
+
+                no_id_scores = cupyx.scipy.sparse.coo_matrix(
+                    (scores_tx.data, (scores_tx.row, scores_tx.col)), shape=scores_tx.shape
+                )
+                if no_id_scores.data.size > 0:
+                    score_cut_tx = np.median(no_id_scores.data)
+                    no_id_scores.data[no_id_scores.data < score_cut_tx] = 0
+                    no_id_scores = zero_out_diagonal_gpu(no_id_scores)
+                    no_id_scores.eliminate_zeros()
+
+                    non_zero_rows, non_zero_cols, _ = find(no_id_scores)
+                    source_nodes = transcript_id[non_zero_rows.get()]
+                    target_nodes = transcript_id[non_zero_cols.get()]
+
+                    edge_index_ddf = delayed(dd.from_pandas)(
+                        pd.DataFrame({"source": source_nodes, "target": target_nodes}), npartitions=1
+                    )
+                    delayed_write_edge_index = delayed(edge_index_ddf.to_parquet)(
+                        edge_index_save_path, append=True, ignore_divisions=True
+                    )
+                    delayed_write_edge_index.persist()
+
+                    source_indices = np.asarray(non_zero_rows.get())
+                    target_indices = np.asarray(non_zero_cols.get())
+                    data_cp = np.ones(len(source_indices), dtype=np.float32)
+                    coo_cp_matrix = scipy_coo_matrix(
+                        (data_cp, (source_indices, target_indices)),
+                        shape=(len(transcript_id), len(transcript_id)),
+                    )
+                    n, comps = cc(coo_cp_matrix, directed=True, connection="strong")
+                    new_ids = np.array([_get_id() for _ in range(n)])
+                    comp_labels = new_ids[comps]
+                    assignments["segger_cell_id"] = comp_labels
+
+            assignments = {
+                "transcript_id": assignments["transcript_id"].astype("str"),
+                "score": assignments["score"].astype("float32"),
+                "segger_cell_id": pd.Series(assignments["segger_cell_id"]).astype("str"),
+                "bound": assignments["bound"].astype("int8"),
+            }
+
+            assignments = pd.DataFrame(assignments)
+            batch_ddf = delayed(dd.from_pandas)(assignments, npartitions=1)
+            delayed_write_output_ddf = delayed(batch_ddf.to_parquet)(
+                output_ddf_save_path, append=True, ignore_divisions=True
+            )
+            delayed_write_output_ddf.persist()
 
 
 def segment(
@@ -448,6 +575,10 @@ def segment(
     save_cell_masks: bool = False,  # Placeholder for future implementation
     receptive_field: dict = {"k_bd": 4, "dist_bd": 10, "k_tx": 5, "dist_tx": 3},
     knn_method: str = "cuda",
+    tx_graph_mode: str = "kdtree",
+    grid_connectivity: int = 8,
+    within_bin_edges: str = "none",
+    bin_pitch: float = 1.0,
     verbose: bool = False,
     gpu_ids: list = ["0"],
     **anndata_kwargs,
@@ -528,6 +659,10 @@ def segment(
                 receptive_field,
                 use_cc=use_cc,
                 knn_method=knn_method,
+                tx_graph_mode=tx_graph_mode,
+                grid_connectivity=grid_connectivity,
+                within_bin_edges=within_bin_edges,
+                bin_pitch=bin_pitch,
                 edge_index_save_path=edge_index_save_path,
                 output_ddf_save_path=output_ddf_save_path,
                 gpu_id=gpu_id,
