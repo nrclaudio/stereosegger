@@ -75,6 +75,12 @@ Graph mode guidance:
 - `grid_bins`: optional ablation/debug mode that collapses nodes to unique bins with aggregate features.
 - `kdtree`: original behavior for Xenium/MERSCOPE; still supported for SAW if you want distance-based adjacency.
 
+Modeling choices and impact:
+
+- Token-based gene embeddings (default): each transcript node carries a gene ID token, and the model learns an embedding per gene. For SAW bin1 this is the standard path because transcripts are indexed by `gene_id`.
+- scRNAseq cell-type abundance embeddings: if you pass `--scrnaseq_file` and `--celltype_column`, Segger uses gene-by-cell-type abundance vectors as fixed features. This injects biological priors but requires gene-name alignment; missing genes are filtered.
+- Count feature (`log1p(count)`): when a `count` column exists, Segger adds expression strength without expanding nodes. For token-based embeddings it scales the gene embedding by `(1 + log1p(count))`; for scRNAseq embeddings it appends `log1p(count)` as an extra feature.
+
 Boundaries:
 
 - SAW bin1 conversion can optionally write `boundaries.parquet` from label TIFFs.
