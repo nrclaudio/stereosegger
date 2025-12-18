@@ -55,6 +55,28 @@ Recommended defaults: `grid_connectivity=8`, `within_bin_edges=star` (optional),
 
 ---
 
+# Stereo-seq SAW bin1 Notes and Design Choices
+
+Why SAW bin1 is handled differently:
+
+- SAW bin1 is already a regular grid with counts per (bin, gene), not per-molecule coordinates. Treating each nonzero entry as a pseudo-transcript preserves gene identity while keeping bin-level counts.
+- Grid adjacency is a more faithful neighborhood for bins than a distance-based kNN on pseudo-points. It keeps local structure consistent with the chip layout and avoids sensitivity to sparsity or count magnitude.
+- The added `log1p(count)` feature lets the model see expression strength without exploding the number of nodes (no count expansion).
+
+Graph mode guidance:
+
+- `grid_same_gene`: connect same gene across neighboring bins. This preserves gene-specific spatial continuity and is the default for SAW.
+- `within_bin_edges=star`: optionally connect co-expressed genes within a bin to share signal locally.
+- `grid_bins`: optional ablation/debug mode that collapses nodes to unique bins with aggregate features.
+- `kdtree`: original behavior for Xenium/MERSCOPE; still supported for SAW if you want distance-based adjacency.
+
+Boundaries:
+
+- SAW bin1 conversion can optionally write `boundaries.parquet` from label TIFFs.
+- If boundaries are missing, dataset creation and prediction can still run in a prediction-only mode (no training labels).
+
+---
+
 # Why segger?
 
 - **Highly parallelizable** – Optimized for multi-GPU environments
