@@ -51,6 +51,21 @@ Modeling choices and impact:
 - scRNAseq cell-type abundance embeddings: if you pass `--scrnaseq_file` and `--celltype_column`, Segger uses gene-by-cell-type abundance vectors as fixed features. This injects biological priors but requires gene-name alignment; missing genes are filtered.
 - Count feature (`log1p(count)`): when a `count` column exists, Segger adds expression strength without expanding nodes. For token-based embeddings it scales the gene embedding by `(1 + log1p(count))`; for scRNAseq embeddings it appends `log1p(count)` as an extra feature.
 
+Token-based embedding example:
+
+The gene name is treated as a categorical ID, not as text. Segger maps each gene to an integer and looks up a trainable vector:
+
+```
+gene_name -> gene_id (0..N-1)
+embedding = E[gene_id]  # E is a learned matrix (num_genes x emb_dim)
+```
+
+The embedding matrix `E` is updated during training to make gene identities useful for the segmentation task.
+
+scRNAseq embedding example:
+
+If you pass `--scrnaseq_file`, each gene is represented by a fixed vector of cell-type abundances (fraction of cells of each type that express the gene). Those vectors are used directly as node features and then linearly projected inside the model. This injects biological prior knowledge but only works if gene names match between scRNAseq and the spatial data.
+
 Boundaries:
 
 - SAW bin1 conversion can optionally write `boundaries.parquet` from label TIFFs.
