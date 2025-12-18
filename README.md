@@ -63,6 +63,11 @@ Why SAW bin1 is handled differently:
 - Grid adjacency is a more faithful neighborhood for bins than a distance-based kNN on pseudo-points. It keeps local structure consistent with the chip layout and avoids sensitivity to sparsity or count magnitude.
 - The added `log1p(count)` feature lets the model see expression strength without exploding the number of nodes (no count expansion).
 
+Definitions:
+
+- Pseudo-transcript: a node created from a nonzero (bin, gene) entry. It carries the gene identity, uses the bin’s (x, y) coordinates, and stores `log1p(count)` as an extra scalar feature. It is not a single molecule; it is a bin-level aggregate.
+- Grid adjacency: two bins are neighbors if their integer grid coordinates differ by one step. With 4-connectivity this is up/down/left/right; with 8-connectivity it also includes diagonals.
+
 Graph mode guidance:
 
 - `grid_same_gene`: connect same gene across neighboring bins. This preserves gene-specific spatial continuity and is the default for SAW.
