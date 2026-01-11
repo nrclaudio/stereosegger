@@ -71,7 +71,7 @@ def filter_transcripts(
 
 
 def compute_transcript_metrics(
-    df: pd.DataFrame, qv_threshold: float = 30, cell_id_col: str = "cell_id"
+    df: pd.DataFrame, qv_threshold: float = 30, cell_id_col: str = "segger_cell_id"
 ) -> Dict[str, Any]:
     """
     Computes various metrics for a given dataframe of transcript data filtered by quality value threshold.
@@ -123,7 +123,7 @@ def create_anndata(
     df: pd.DataFrame,
     panel_df: Optional[pd.DataFrame] = None,
     min_transcripts: int = 5,
-    cell_id_col: str = "cell_id",
+    cell_id_col: str = "segger_cell_id",
     qv_threshold: float = 30,
     min_cell_area: float = 10.0,
     max_cell_area: float = 1000.0,

@@ -592,7 +592,6 @@ def segment(
         print(f"Assigned transcripts to nuclei in {elapsed_time:.2f} seconds.")
     # Load the full saved segmentation results
     seg_final_dd = dd.read_parquet(output_ddf_save_path, ignore_metadata_file=True)
-    seg_final_dd = seg_final_dd.set_index("transcript_id", sorted=False)
 
     step_start_time = time()
     if verbose:
@@ -603,7 +602,7 @@ def segment(
     max_unbound_idx = seg_final_dd[seg_final_dd["bound"] == 0].groupby("transcript_id")["score"].idxmax()
 
     # Step 2: Combine indices, prioritizing bound=1 scores
-    final_idx = max_bound_idx.combine_first(max_unbound_idx).compute()
+    final_idx = max_bound_idx.compute().combine_first(max_unbound_idx.compute())
 
     # Step 3: Use the computed final_idx to select the best assignments
     # Make sure you are using the divisions and set the index correctly before loc

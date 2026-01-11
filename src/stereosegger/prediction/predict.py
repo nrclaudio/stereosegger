@@ -375,12 +375,6 @@ def predict(
     # Concatenate all assignments into a single Dask DataFrame
     final_assignments = dd.concat(all_assignments, ignore_index=True)
 
-    # Sort the Dask DataFrame by 'transcript_id' before setting it as an index
-    final_assignments = final_assignments.sort_values(by="transcript_id")
-
-    # Set a unique index for Dask DataFrame
-    final_assignments = final_assignments.set_index("transcript_id", sorted=True)
-
     # Max score selection logic
     max_bound_idx = final_assignments[final_assignments["bound"] == 1].groupby("transcript_id")["score"].idxmax()
     max_unbound_idx = final_assignments[final_assignments["bound"] == 0].groupby("transcript_id")["score"].idxmax()
@@ -389,7 +383,7 @@ def predict(
     final_idx = max_bound_idx.combine_first(max_unbound_idx).compute()  # Ensure it's computed
 
     # Now use the computed final_idx for indexing
-    result = final_assignments.loc[final_idx].compute().reset_index(names=["transcript_id"])
+    result = final_assignments.loc[final_idx].compute().reset_index(drop=True)
 
     # result = results.reset_index()
 
