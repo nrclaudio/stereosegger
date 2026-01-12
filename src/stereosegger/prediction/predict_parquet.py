@@ -807,6 +807,48 @@ def segment(
     # Step 5: Save the merged results based on options
     transcripts_df_filtered["segger_cell_id"] = transcripts_df_filtered["segger_cell_id"].fillna("UNASSIGNED")
 
+    # Handle missing feature_name (e.g. if input only has gene_id)
+    if "feature_name" not in transcripts_df_filtered.columns and "gene_id" in transcripts_df_filtered.columns:
+        if verbose:
+            print("Mapping gene_id to feature_name...")
+        
+        transcript_path = Path(transcript_file)
+        genes_file = transcript_path.parent / "genes.parquet"
+        
+        if genes_file.exists():
+            if verbose:
+                 print(f"Found genes mapping at {genes_file}")
+            try:
+                genes_df = pd.read_parquet(genes_file)
+                if "gene_id" in genes_df.columns and "gene_name" in genes_df.columns:
+                    # Merge to get gene_name
+                    transcripts_df_filtered = transcripts_df_filtered.merge(
+                        genes_df[["gene_id", "gene_name"]], 
+                        on="gene_id", 
+                        how="left"
+                    )
+                    # Rename gene_name to feature_name
+                    transcripts_df_filtered = transcripts_df_filtered.rename(columns={"gene_name": "feature_name"})
+                    # Fill any missing names with ID if mapping failed for some
+                    transcripts_df_filtered["feature_name"] = transcripts_df_filtered["feature_name"].fillna(transcripts_df_filtered["gene_id"].astype(str))
+                else:
+                    if verbose:
+                        print("genes.parquet columns mismatch, using gene_id as feature_name")
+                    transcripts_df_filtered = transcripts_df_filtered.rename(columns={"gene_id": "feature_name"})
+            except Exception as e:
+                print(f"Error reading genes.parquet: {e}. Using gene_id as feature_name.")
+                transcripts_df_filtered = transcripts_df_filtered.rename(columns={"gene_id": "feature_name"})
+        else:
+            if verbose:
+                print("genes.parquet not found, using gene_id as feature_name")
+            transcripts_df_filtered = transcripts_df_filtered.rename(columns={"gene_id": "feature_name"})
+
+    # Handle missing x_location/y_location (e.g. if input has x/y)
+    if "x_location" not in transcripts_df_filtered.columns and "x" in transcripts_df_filtered.columns:
+        transcripts_df_filtered = transcripts_df_filtered.rename(columns={"x": "x_location"})
+    if "y_location" not in transcripts_df_filtered.columns and "y" in transcripts_df_filtered.columns:
+        transcripts_df_filtered = transcripts_df_filtered.rename(columns={"y": "y_location"})
+
     if save_transcripts:
         if verbose:
             step_start_time = time()
