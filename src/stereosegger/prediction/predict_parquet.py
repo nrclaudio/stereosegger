@@ -136,6 +136,17 @@ def subset_sparse_matrix(sparse_matrix, row_idx, col_idx):
     return coo_matrix((data_filtered, (row_mapped, col_mapped)), shape=(len(row_idx), len(col_idx)))
 
 
+def get_best_candidates(df):
+    """
+    Helper function to filter a DataFrame partition for the best candidates.
+    Sorts by score descending and drops duplicates by transcript_id.
+    """
+    # Sort by score descending
+    df = df.sort_values("score", ascending=False)
+    # Keep first (best) per transcript
+    return df.drop_duplicates(subset="transcript_id", keep="first")
+
+
 def load_model(checkpoint_path: str) -> LitSegger:
     """
     Load a LitSegger model from a checkpoint.
@@ -672,22 +683,25 @@ def segment(
         elapsed_time = time() - step_start_time
         print(f"Batch processing completed in {elapsed_time:.2f} seconds.")
 
-    seg_final_dd = pd.read_parquet(output_ddf_save_path)
-
     step_start_time = time()
     if verbose:
-        print(f"Applying max score selection logic...")
+        print(f"Applying max score selection logic (Dask optimized)...")
 
-    max_bound = seg_final_dd[seg_final_dd["bound"] == 1]
-    max_bound = max_bound.loc[max_bound.groupby("transcript_id")["score"].idxmax()]
+    # Use Dask to load and process the potentially large results file
+    # This avoids OOM by processing partitions one by one
+    ddf = dd.read_parquet(output_ddf_save_path)
     
-    # Step 2: Filter by 'bound' == 0 and find the maximum score for each transcript_id
-    max_unbound = seg_final_dd[seg_final_dd["bound"] != 1]
-    max_unbound = max_unbound.loc[max_unbound.groupby("transcript_id")["score"].idxmax()]
-
-    seg_final_filtered = pd.concat([max_bound, max_unbound]).sort_values(
-        "score", ascending=False
-    ).drop_duplicates(subset="transcript_id", keep="first")
+    # Apply reduction per partition to keep only best candidates (drastically reduces size)
+    # The result 'candidates' is a Pandas DataFrame
+    candidates = ddf.map_partitions(get_best_candidates).compute()
+    
+    # Final global reduction on the aggregated candidates
+    seg_final_filtered = candidates.sort_values("score", ascending=False).drop_duplicates(subset="transcript_id", keep="first")
+    
+    # Clean up intermediate objects
+    del candidates
+    del ddf
+    gc.collect()
 
     if verbose:
         elapsed_time = time() - step_start_time
