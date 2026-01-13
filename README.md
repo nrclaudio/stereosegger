@@ -131,11 +131,31 @@ conda create -n stereosegger python=3.10 pip -y
 conda activate stereosegger
 ```
 
-### Step 2: Install dependencies
-We provide a `requirements.txt` pre-configured for **CUDA 12.x** and **PyTorch 2.5.1**.
+### Step 2: Install Core Dependencies (PyTorch, RAPIDS, CuPy)
+StereoSegger relies on GPU acceleration. We recommend installing the core stack first to ensure compatibility.
+
+**Using Pip (Recommended for Linux/WSL with CUDA 12):**
 ```bash
-# From the root of the repository
-pip install -r requirements.txt
+# 1. Install PyTorch (match your CUDA version, e.g., 12.4)
+pip install torch==2.5.1 torchvision --index-url https://download.pytorch.org/whl/cu124
+
+# 2. Install RAPIDS (cuDF, cuML, cuGraph) and CuPy
+pip install cudf-cu12==24.8.* cuml-cu12==24.8.* cugraph-cu12==24.8.* cuspatial-cu12==24.8.* cupy-cuda12x \
+    --extra-index-url https://pypi.nvidia.com
+
+# 3. Install PyTorch Geometric and optimized kernels
+pip install torch_geometric
+pip install torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.5.1+cu124.html
+```
+
+**Using Conda:**
+```bash
+# Install compatible versions of PyTorch, RAPIDS, and CuPy
+conda install -c pytorch -c nvidia -c rapidsai -c conda-forge \
+    pytorch=2.5.1 torchvision pytorch-cuda=12.4 \
+    rapids=24.8 python=3.10 cuda-version=12.4 \
+    cupy
+pip install torch_geometric
 ```
 
 ### Step 3: Install StereoSegger
