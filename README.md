@@ -143,28 +143,6 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
----
-
-## Installation on macOS (M1/M2/M3)
-
-> **Note:** macOS is supported for **training** and **data preparation** only. **Prediction** currently requires an NVIDIA GPU.
-
-```bash
-# 1. Create Environment
-conda create -n stereosegger_mac python=3.10 pip -y
-conda activate stereosegger_mac
-
-# 2. Install Science Stack (CPU/MPS compatible)
-pip install numpy pandas scipy matplotlib seaborn tqdm scanpy squidpy scikit-learn \
-    geopandas shapely path pyarrow dask-geopandas lightning torchmetrics \
-    zarr anndata adjustText pqdm rtree
-
-# 3. Install PyTorch (MPS support)
-pip install torch torchvision
-
-# 4. Install StereoSegger
-pip install -e .
-```
 
 ---
 
