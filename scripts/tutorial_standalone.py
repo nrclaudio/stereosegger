@@ -5,39 +5,55 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 import torch
+import warnings
 
 # === SETUP ===
-# Add local segger source to path if not installed via pip
-# Adjust this path to point to your 'tools/segger/src' directory if needed
+# Add local stereosegger source to path if not installed via pip
 script_dir = Path(__file__).resolve().parent
-repo_root = script_dir.parent.parent.parent # Assuming tools/segger/scripts/
-segger_src = repo_root / "tools" / "segger" / "src"
+repo_root = script_dir.parent  # Assumes script is in root/scripts/
+segger_src = repo_root / "src"
 
 if str(segger_src) not in sys.path:
     sys.path.insert(0, str(segger_src))
 
 try:
-    import segger
-    from segger.cli.convert_saw_h5ad_to_segger_parquet import convert_saw_h5ad_to_parquet
-    from segger.data.parquet.sample import STSampleParquet
-    from segger.training.segger_data_module import SeggerDataModule
-    from segger.training.train import LitSegger
-    from segger.prediction import torch_predict
+    import stereosegger
+    from stereosegger.cli.convert_saw_h5ad_to_segger_parquet import convert_saw_h5ad_to_parquet
+    from stereosegger.data.parquet.sample import STSampleParquet
+    from stereosegger.training.segger_data_module import SeggerDataModule
+    from stereosegger.training.train import LitSegger
     from pytorch_lightning import Trainer
     from pytorch_lightning.loggers import CSVLogger
-    print(f"Segger imported from: {segger.__file__}")
+    
+    # Try importing prediction modules (requires CuPy/CUDA)
+    try:
+        from stereosegger.prediction.predict import predict_batch
+        HAS_PREDICTION_SUPPORT = True
+    except ImportError:
+        HAS_PREDICTION_SUPPORT = False
+        print("Warning: CuPy not found. Inference step will be skipped.")
+
+    print(f"StereoSegger imported from: {stereosegger.__file__}")
 except ImportError as e:
-    print(f"Error importing segger: {e}")
+    print(f"Error importing stereosegger: {e}")
     sys.exit(1)
 
 def main():
     # === CONFIGURATION ===
     # Input H5AD file (Update this path to your file)
-    # Example path based on your workspace
-    input_h5ad = repo_root / "data" / "raw" / "realigned" / "realigned_C04895D5" / "C04895D5_tissue.h5ad"
+    # Example placeholder path
+    input_h5ad = repo_root / "data" / "example.h5ad" 
+    
+    # Create a dummy H5AD if it doesn't exist for tutorial purposes?
+    # For now, we'll check if it exists and warn user.
+    if not input_h5ad.exists():
+        print(f"\n[!] Input file {input_h5ad} not found.")
+        print("Please edit the 'input_h5ad' variable in this script to point to your .h5ad file.")
+        print("Exiting...")
+        return
 
     # Output Base Directory for this experiment
-    experiment_name = "tutorial_C04895D5"
+    experiment_name = "tutorial_experiment"
     base_out_dir = repo_root / "tutorial_output" / experiment_name
 
     # Subdirectories
@@ -56,10 +72,6 @@ def main():
     # === 1. CONVERSION (H5AD -> Parquet) ===
     print(f"\n=== 1. Converting {input_h5ad.name} ===")
     
-    if not input_h5ad.exists():
-        print(f"Error: Input file {input_h5ad} not found.")
-        return
-
     convert_saw_h5ad_to_parquet(
         h5ad_path=input_h5ad,
         out_dir=inputs_dir,
@@ -68,7 +80,7 @@ def main():
         labels_tif=None,       # Optional: Path to label image for supervision
         tissue_mask_tif=None,  # Optional: Path to tissue mask
         bbox=None,             # Optional: (xmin, xmax, ymin, ymax) to crop
-        gene_name_source="gene_name", # or 'real_gene_name' depending on your h5ad
+        gene_name_source="gene_name", # Adjust based on your h5ad.var columns
         top_genes=None         # Optional: Limit to top K genes
     )
 
@@ -88,6 +100,7 @@ def main():
     )
 
     # Save (Create) the dataset tiles
+    # Using 'grid_same_gene' with 'star' topology as recommended for Stereo-seq
     sample.save(
         data_dir=dataset_dir,
         k_bd=3, dist_bd=15.0,  # Boundary connectivity (irrelevant if no labels)
@@ -114,7 +127,7 @@ def main():
     dm = SeggerDataModule(
         data_dir=dataset_dir,
         batch_size=1,
-        num_workers=0  # 0 for safety in notebooks/mac
+        num_workers=0  # 0 for safety in notebooks/mac to avoid forking issues
     )
     dm.setup()
 
@@ -132,6 +145,7 @@ def main():
     is_token_based = False
     num_tx_features = 0
 
+    # Flexible check for feature dimensions
     if hasattr(sample_data["tx"], "token_based") and sample_data["tx"].token_based:
         is_token_based = True
         num_tx_features = num_tx_tokens
@@ -140,8 +154,8 @@ def main():
         num_tx_features = num_tx_tokens
     else:
         # Fallback/Check for (N, 2) case manually if needed
+        # Commonly for SAW bin1: [Index, Count] -> token based logic inside model
         if sample_data.x_dict["tx"].ndim == 2 and sample_data.x_dict["tx"].shape[1] == 2:
-            # This handles the specific case of [Index, Count] inputs
             is_token_based = True
             num_tx_features = num_tx_tokens
         else:
@@ -167,30 +181,53 @@ def main():
     trainer = Trainer(
         accelerator="auto", # 'mps' on Mac, 'cuda' on Linux
         devices=1,
-        max_epochs=5,       # Short run for tutorial
+        max_epochs=2,       # Short run for tutorial
         default_root_dir=model_dir,
         logger=CSVLogger(model_dir),
+        enable_checkpointing=True
     )
 
     print("Starting Training...")
     trainer.fit(model=model, datamodule=dm)
+    print("Training Complete.")
 
     # === 4. INFERENCE ===
     print("\n=== 4. Running Inference ===")
     
+    if not HAS_PREDICTION_SUPPORT or not torch.cuda.is_available():
+        print("[!] Skipping Inference: Requires NVIDIA GPU and CuPy.")
+        print("To run inference, execute this script on a machine with a CUDA-enabled GPU.")
+        return
+
+    # If we are here, we have CUDA and CuPy
+    print("GPU detected. Running inference on test set...")
     model.eval()
-    model.to("cpu") # Run on CPU for simple inference
+    model.to("cuda")
 
     all_assignments = []
-    loaders = [dm.train_dataloader(), dm.val_dataloader(), dm.test_dataloader()]
+    # Using the test dataloader for demonstration
+    loader = dm.test_dataloader()
 
-    for loader in loaders:
-        for batch in tqdm(loader, leave=False):
+    receptive_field = {
+        "k_bd": 3, "dist_bd": 15.0,
+        "k_tx": 3, "dist_tx": 5.0
+    }
+
+    with torch.no_grad():
+        for batch in tqdm(loader, desc="Predicting"):
             try:
-                # use_cc=True refines predictions using connected components
-                df = torch_predict.predict_batch(model.model, batch, score_cut=0.5, use_cc=True)
+                # predict_batch returns a DataFrame with assignments
+                df = predict_batch(
+                    model, 
+                    batch, 
+                    score_cut=0.5, 
+                    receptive_field=receptive_field, 
+                    use_cc=True, 
+                    knn_method="kd_tree"
+                )
                 all_assignments.append(df)
-            except Exception:
+            except Exception as e:
+                print(f"Batch prediction failed: {e}")
                 pass
 
     if all_assignments:
@@ -203,7 +240,7 @@ def main():
         full_df.to_parquet(out_file)
         print(f"Saved to {out_file}")
     else:
-        print("No assignments generated (Likely due to missing boundaries in training data for this tutorial).")
+        print("No assignments generated.")
 
 if __name__ == "__main__":
     main()
