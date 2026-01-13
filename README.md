@@ -148,6 +148,11 @@ pip install torch_geometric
 pip install torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.5.1+cu124.html
 ```
 
+> **Note:** When using **pip** for RAPIDS, you may need to update your `LD_LIBRARY_PATH` if you encounter import errors (e.g., `libcusolver.so.11: cannot open shared object file`).
+> ```bash
+> export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/path/to/your/env/lib/python3.10/site-packages/nvidia/cusparse/lib:/path/to/your/env/lib/python3.10/site-packages/nvidia/cublas/lib
+> ```
+
 **Using Conda:**
 ```bash
 # Install compatible versions of PyTorch, RAPIDS, and CuPy
