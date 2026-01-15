@@ -15,12 +15,12 @@ python -m segger.cli.create_dataset_fast \
   --base_dir /path/to/base_dir \
   --data_dir /path/to/stereosegger_dataset \
   --sample_type saw_bin1 \
-  --tx_graph_mode grid_same_gene \
+  --tx_graph_mode grid_bins \
   --grid_connectivity 8 \
   --within_bin_edges star
 ```
 
-Recommended defaults: `grid_connectivity=8`, `within_bin_edges=star` (optional), `bin_pitch=1.0` when coords are in bin units.
+Recommended defaults: `grid_connectivity=8`, `within_bin_edges=star` (for gene-specific nodes), `bin_pitch=1.0` when coords are in bin units.
 
 ---
 
@@ -175,48 +175,28 @@ pip install -e .
 
 Why SAW bin1 is handled differently:
 
-- SAW bin1 is already a regular grid with counts per (bin, gene), not per-molecule coordinates. Treating each nonzero entry as a pseudo-transcript preserves gene identity while keeping bin-level counts.
+- SAW bin1 is already a regular grid with counts per (bin, gene), not per-molecule coordinates.
 - Grid adjacency is a more faithful neighborhood for bins than a distance-based kNN on pseudo-points. It keeps local structure consistent with the chip layout and avoids sensitivity to sparsity or count magnitude.
 - The added `log1p(count)` feature lets the model see expression strength without exploding the number of nodes (no count expansion).
 
 Definitions:
 
-- Pseudo-transcript: a node created from a nonzero (bin, gene) entry. It carries the gene identity, uses the bin’s (x, y) coordinates, and stores `log1p(count)` as an extra scalar feature. It is not a single molecule; it is a bin-level aggregate.
-- Grid adjacency: two bins are neighbors if their integer grid coordinates differ by one step. With 4-connectivity this is up/down/left/right; with 8-connectivity it also includes diagonals.
+- **Pseudo-transcript (Gene-Bin Node):** A node created from a nonzero (bin, gene) entry. It carries the gene identity, uses the bin’s (x, y) coordinates, and stores `log1p(count)` as an extra scalar feature. This is the behavior when `within_bin_edges=star`.
+- **Aggregated Bin Node:** A node representing an entire spatial bin, aggregating all transcripts within it. Features are `[log(total_count), log(n_genes)]`. Gene identity is implicit. This is the behavior when `within_bin_edges=none`.
+- **Grid adjacency:** Two bins are neighbors if their integer grid coordinates differ by one step. With 4-connectivity this is up/down/left/right; with 8-connectivity it also includes diagonals.
 
-Graph mode guidance:
+Graph mode guidance (`--tx_graph_mode grid_bins`):
 
-- `grid_same_gene`: connect same gene across neighboring bins. This preserves gene-specific spatial continuity and is the default for SAW.
-- `within_bin_edges=star`: optionally connect co-expressed genes within a bin to share signal locally.
-    - **Optimization:** For dense data, set to `none` to avoid performance bottlenecks.
-- `grid_bins`: optional ablation/debug mode that collapses nodes to unique bins with aggregate features.
-- `kdtree`: original behavior for Xenium/MERSCOPE; still supported for SAW if you want distance-based adjacency.
+- `within_bin_edges=star`: **Recommended for SAW.** Creates independent nodes for each gene present in a bin. Connects all genes in a bin to a central "hub" gene, and connects hubs across adjacent bins. Preserves gene identity while leveraging the grid structure.
+- `within_bin_edges=none`: Aggregates all transcripts in a bin into a single node. Fastest, but loses gene-specific identity in the graph topology (features are just counts). Useful for very high density or quick prototyping.
+
+Other modes:
+- `kdtree`: Original behavior for Xenium/MERSCOPE (single-molecule resolution); still supported for SAW if you want distance-based adjacency.
 
 Modeling choices and impact:
 
-- Token-based gene embeddings (default): each transcript node carries a gene ID token, and the model learns an embedding per gene. For SAW bin1 this is the standard path because transcripts are indexed by `gene_id`.
-- scRNAseq cell-type abundance embeddings: if you pass `--scrnaseq_file` and `--celltype_column`, StereoSegger uses gene-by-cell-type abundance vectors as fixed features. This injects biological priors but requires gene-name alignment; missing genes are filtered.
-- Count feature (`log1p(count)`): when a `count` column exists, StereoSegger adds expression strength without expanding nodes. For token-based embeddings it scales the gene embedding by `(1 + log1p(count))`; for scRNAseq embeddings it appends `log1p(count)` as an extra feature.
-
-Token-based embedding example:
-
-The gene name is treated as a categorical ID, not as text. StereoSegger maps each gene to an integer and looks up a trainable vector:
-
-```
-gene_name -> gene_id (0..N-1)
-embedding = E[gene_id]  # E is a learned matrix (num_genes x emb_dim)
-```
-
-The embedding matrix `E` is updated during training to make gene identities useful for the segmentation task.
-
-scRNAseq embedding example:
-
-If you pass `--scrnaseq_file`, each gene is represented by a fixed vector of cell-type abundances (fraction of cells of each type that express the gene). Those vectors are used directly as node features and then linearly projected inside the model. This injects biological prior knowledge but only works if gene names match between scRNAseq and the spatial data.
-
-Boundaries:
-
-- SAW bin1 conversion can optionally write `boundaries.parquet` from label TIFFs.
-- If boundaries are missing, dataset creation and prediction can still run in a prediction-only mode (no training labels).
+- Token-based gene embeddings (default): When using `kdtree` or `grid_bins` (star), each node carries a gene ID token, and the model learns an embedding per gene.
+- Count feature (`log1p(count)`): when a `count` column exists, StereoSegger adds expression strength without expanding nodes. For token-based embeddings it scales the gene embedding by `(1 + log1p(count))`.
 
 ---
 
@@ -229,10 +209,10 @@ The graph consists of two distinct node types:
 
 *   **Transcript Nodes (`tx`):**
     *   **Identity:** Represents a specific gene detected at a specific spatial location.
-    *   **Resolution:** For Stereo-seq (SAW bin1), each node corresponds to a `(bin, gene)` tuple. If a single bin contains 10 distinct genes, it generates 10 distinct nodes.
+    *   **Resolution:** For Stereo-seq (SAW bin1), each node corresponds to a `(bin, gene)` tuple. If a single bin contains 10 distinct genes, it generates 10 distinct nodes (in "star" mode).
     *   **Features:**
-        *   **Gene Embedding:** A learnable vector representing the gene identity (e.g., "Ins2" gets a unique vector, "Nphs1" gets another).
-        *   **UMI Count:** The embedding vector is scaled by `(1 + log(count))` to represent the signal intensity without creating duplicate nodes.
+        *   **Gene Embedding:** A learnable vector representing the gene identity.
+        *   **UMI Count:** The embedding vector is scaled by `(1 + log(count))` to represent the signal intensity.
 
 *   **Boundary Nodes (`bd`):**
     *   **Identity:** Represents a polygon boundary (e.g., a cell or nucleus segmentation).
@@ -242,9 +222,10 @@ The graph consists of two distinct node types:
 Information flows between nodes via three types of directed edges:
 
 *   **`tx` $\leftrightarrow$ `tx` (Transcript-Transcript):**
-    *   Connects transcripts of the **same gene** in adjacent spatial bins (Grid Adjacency).
-    *   Allows the model to recognize contiguous "blobs" of expression belonging to the same gene/transcript.
-    *   Optionally connects different genes within the same bin ("star" topology) to model local co-expression.
+    *   **Grid Star Topology:**
+        *   **Within Bin:** All gene nodes in a bin connect to a central "hub" node (one of the genes in that bin).
+        *   **Across Bins:** Hub nodes connect to hub nodes of adjacent spatial bins (Grid Adjacency).
+    *   Allows the model to aggregate local co-expression (within bin) and spatial continuity (across bins).
 
 *   **`tx` $\rightarrow$ `bd` (Transcript-Boundary Neighbors):**
     *   Connects a transcript to nearby boundaries (potential candidate cells).
@@ -252,21 +233,3 @@ Information flows between nodes via three types of directed edges:
 
 *   **`tx` $\rightarrow$ `bd` (Transcript-Boundary Assignment - Supervision):**
     *   Connects a transcript to the *correct* boundary (Ground Truth) during training.
-
-### 3. The Neural Network (GATv2)
-The model processes the graph in layers:
-
-1.  **Input Layer:**
-    *   Initializes learnable embeddings for `tx` nodes.
-    *   Initializes geometric feature encodings for `bd` nodes.
-
-2.  **Message Passing Layers (SkipGAT):**
-    *   Uses **GATv2Conv** (Graph Attention Version 2) to aggregate information.
-    *   **Mechanism:** Each node updates its representation by attending to its neighbors. A transcript "asks" its neighbors: *"Are you part of the same cell? What gene are you?"*
-    *   **Skip Connections:** Residual connections are added to preserve signal depth.
-
-3.  **Decoding (Prediction):**
-    *   For every `tx` $\rightarrow$ `bd` edge, the model computes a similarity score (dot product) between the final transcript embedding and the boundary embedding.
-    *   **Output:** A probability score (0 to 1) indicating confidence that the transcript belongs to that cell.
-
----

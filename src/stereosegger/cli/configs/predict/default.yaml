@@ -69,7 +69,7 @@ dist_tx:
 tx_graph_mode:
   type: str
   default: "kdtree"
-  help: Strategy for transcript-transcript edges (kdtree, grid_same_gene, grid_bins).
+  help: Strategy for transcript-transcript edges (kdtree, grid_bins).
 grid_connectivity:
   type: int
   default: 8

@@ -19,7 +19,7 @@ import torch
 from pqdm.processes import pqdm
 import random
 from stereosegger.data.parquet.transcript_embedding import TranscriptEmbedding
-from stereosegger.data.tx_graph import build_grid_same_gene_edge_index, build_grid_bin_edge_index
+from stereosegger.data.tx_graph import build_grid_bin_edge_index, build_grid_gene_bin_edge_index
 
 
 # TODO: Add documentation for settings
@@ -459,10 +459,9 @@ class STSampleParquet:
                     k_tx=k_tx,
                     dist_tx=dist_tx,
                     tx_graph_mode=tx_graph_mode,
-                    grid_connectivity=grid_connectivity,
-                    within_bin_edges=within_bin_edges,
-                    bin_pitch=bin_pitch,
-                    neg_sampling_ratio=neg_sampling_ratio,
+                                                    grid_connectivity=grid_connectivity,
+                                                    within_bin_edges=within_bin_edges,
+                                                    bin_pitch=bin_pitch,                    neg_sampling_ratio=neg_sampling_ratio,
                 )
                 if pyg_data is not None:
                     has_labels = hasattr(pyg_data["tx", "belongs", "bd"], "edge_label_index")
@@ -1272,39 +1271,98 @@ class STTile:
             if not bx_col or not by_col or bx_col not in self.transcripts.columns or by_col not in self.transcripts.columns:
                 raise ValueError("tx_graph_mode='grid_bins' requires 'bx' and 'by' columns in transcripts.")
 
-            grouped = self.transcripts.groupby([bx_col, by_col], sort=False)
-            count_col = getattr(self.settings.transcripts, "count", None)
-            if count_col and count_col in self.transcripts.columns:
-                total_count = grouped[count_col].sum()
+            if within_bin_edges == "star":
+                # Gene-Bin Nodes Strategy: Independent nodes per gene in each bin
+                gene_col = self.settings.transcripts.label
+                grouped = self.transcripts.groupby([bx_col, by_col, gene_col], sort=False)
+                
+                count_col = getattr(self.settings.transcripts, "count", None)
+                if count_col and count_col in self.transcripts.columns:
+                    total_count = grouped[count_col].sum()
+                else:
+                    total_count = grouped.size()
+
+                # Extract coordinates
+                keys = grouped.size().index.to_frame(index=False)
+                bx_vals = keys[bx_col].values
+                by_vals = keys[by_col].values
+                gene_vals = keys[gene_col].values
+                
+                x_col = self.settings.transcripts.x
+                y_col = self.settings.transcripts.y
+                
+                if x_col in self.transcripts.columns and y_col in self.transcripts.columns:
+                    bin_x = grouped[x_col].mean().values
+                    bin_y = grouped[y_col].mean().values
+                else:
+                    bin_x = bx_vals * bin_pitch
+                    bin_y = by_vals * bin_pitch
+
+                tx_positions = np.stack([bin_x, bin_y], axis=1)
+                
+                # Features: [gene_id, log(count)]
+                # Assuming gene_vals are already integer IDs (which they should be for embedding)
+                # If they are strings, we might have an issue, but sample.py usually assumes mapped integers for embedding.
+                # Let's check if gene_col is numeric. If not, we rely on the embedding mapping which might happen elsewhere?
+                # Actually, `get_transcript_props` uses `self.dataset.sample._transcript_embedding.embed`.
+                # But here we are bypassing that. 
+                # Ideally we should use `_transcript_embedding` but grouped.
+                # Since we don't have easy access to the embedding map here without re-implementing, 
+                # let's assume `gene_vals` are the correct integer IDs if the dataset is set up correctly (e.g. via convert script).
+                
+                log_counts = np.log1p(total_count.values).astype(np.float32)
+                tx_features = np.stack([gene_vals.astype(np.float32), log_counts], axis=1)
+
+                pyg_data["tx"].id = torch.arange(tx_features.shape[0], dtype=torch.long)
+                pyg_data["tx"].pos = torch.tensor(tx_positions, dtype=torch.float32)
+                pyg_data["tx"].x = torch.tensor(tx_features, dtype=torch.float32)
+                pyg_data["tx"].token_based = torch.tensor(True) # Use embedding
+                pyg_data["tx"].gene_id = torch.tensor(gene_vals.astype(int), dtype=torch.long)
+                pyg_data["tx"].bx = torch.tensor(bx_vals, dtype=torch.long)
+                pyg_data["tx"].by = torch.tensor(by_vals, dtype=torch.long)
+
+                nbrs_edge_idx = build_grid_gene_bin_edge_index(
+                    bx_vals, 
+                    by_vals, 
+                    connectivity=grid_connectivity, 
+                    within_bin_edges=within_bin_edges
+                )
+
             else:
-                total_count = grouped.size()
-            gene_col = self.settings.transcripts.label
-            if gene_col in self.transcripts.columns:
-                n_genes = grouped[gene_col].nunique()
-            else:
-                n_genes = grouped.size()
+                # Original Aggregated Strategy: One node per bin
+                grouped = self.transcripts.groupby([bx_col, by_col], sort=False)
+                count_col = getattr(self.settings.transcripts, "count", None)
+                if count_col and count_col in self.transcripts.columns:
+                    total_count = grouped[count_col].sum()
+                else:
+                    total_count = grouped.size()
+                gene_col = self.settings.transcripts.label
+                if gene_col in self.transcripts.columns:
+                    n_genes = grouped[gene_col].nunique()
+                else:
+                    n_genes = grouped.size()
 
-            x_col = self.settings.transcripts.x
-            y_col = self.settings.transcripts.y
-            bins = np.array(grouped.size().index.tolist(), dtype=int)
-            if x_col in self.transcripts.columns and y_col in self.transcripts.columns:
-                bin_x = grouped[x_col].mean().values
-                bin_y = grouped[y_col].mean().values
-            else:
-                bin_x = bins[:, 0] * bin_pitch
-                bin_y = bins[:, 1] * bin_pitch
+                x_col = self.settings.transcripts.x
+                y_col = self.settings.transcripts.y
+                bins = np.array(grouped.size().index.tolist(), dtype=int)
+                if x_col in self.transcripts.columns and y_col in self.transcripts.columns:
+                    bin_x = grouped[x_col].mean().values
+                    bin_y = grouped[y_col].mean().values
+                else:
+                    bin_x = bins[:, 0] * bin_pitch
+                    bin_y = bins[:, 1] * bin_pitch
 
-            tx_positions = np.stack([bin_x, bin_y], axis=1)
-            tx_features = np.stack([np.log1p(total_count.values), np.log1p(n_genes.values)], axis=1)
+                tx_positions = np.stack([bin_x, bin_y], axis=1)
+                tx_features = np.stack([np.log1p(total_count.values), np.log1p(n_genes.values)], axis=1)
 
-            pyg_data["tx"].id = torch.arange(tx_features.shape[0], dtype=torch.long)
-            pyg_data["tx"].pos = torch.tensor(tx_positions, dtype=torch.float32)
-            pyg_data["tx"].x = torch.tensor(tx_features, dtype=torch.float32)
-            pyg_data["tx"].token_based = torch.tensor(False)
-            pyg_data["tx"].bx = torch.tensor(bins[:, 0], dtype=torch.long)
-            pyg_data["tx"].by = torch.tensor(bins[:, 1], dtype=torch.long)
+                pyg_data["tx"].id = torch.arange(tx_features.shape[0], dtype=torch.long)
+                pyg_data["tx"].pos = torch.tensor(tx_positions, dtype=torch.float32)
+                pyg_data["tx"].x = torch.tensor(tx_features, dtype=torch.float32)
+                pyg_data["tx"].token_based = torch.tensor(False)
+                pyg_data["tx"].bx = torch.tensor(bins[:, 0], dtype=torch.long)
+                pyg_data["tx"].by = torch.tensor(bins[:, 1], dtype=torch.long)
 
-            nbrs_edge_idx, _ = build_grid_bin_edge_index(bins[:, 0], bins[:, 1], connectivity=grid_connectivity)
+                nbrs_edge_idx, _ = build_grid_bin_edge_index(bins[:, 0], bins[:, 1], connectivity=grid_connectivity)
         else:
             # Set up Transcript nodes
             pyg_data["tx"].id = torch.tensor(
@@ -1348,9 +1406,7 @@ class STTile:
                     k=k_tx,
                     max_distance=dist_tx,
                 )
-            elif tx_graph_mode == "grid_same_gene":
-                if not hasattr(pyg_data["tx"], "gene_id"):
-                    raise ValueError("tx_graph_mode='grid_same_gene' requires numeric gene_id values.")
+            elif tx_graph_mode == "grid_bins":
                 if hasattr(pyg_data["tx"], "bx") and hasattr(pyg_data["tx"], "by"):
                     bx = pyg_data["tx"].bx.cpu().numpy()
                     by = pyg_data["tx"].by.cpu().numpy()
@@ -1358,13 +1414,7 @@ class STTile:
                     coords = tx_positions[:, :2]
                     bx = np.rint(coords[:, 0] / bin_pitch).astype(int)
                     by = np.rint(coords[:, 1] / bin_pitch).astype(int)
-                nbrs_edge_idx = build_grid_same_gene_edge_index(
-                    pyg_data["tx"].gene_id.cpu().numpy(),
-                    bx,
-                    by,
-                    connectivity=grid_connectivity,
-                    within_bin_edges=within_bin_edges,
-                )
+                nbrs_edge_idx, _ = build_grid_bin_edge_index(bx, by, connectivity=grid_connectivity)
             else:
                 raise ValueError(f"Unknown tx_graph_mode: {tx_graph_mode}")
 

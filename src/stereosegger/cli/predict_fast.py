@@ -36,23 +36,23 @@ help_msg = "Run the Segger segmentation model."
 @click.option("--dist_tx", type=float, default=5.0, help="Distance for transcript computation.")
 @click.option(
     "--tx_graph_mode",
-    type=click.Choice(["kdtree", "grid_same_gene", "grid_bins"], case_sensitive=False),
+    type=click.Choice(["kdtree", "grid_bins"], case_sensitive=False),
     default="kdtree",
     help="Strategy for transcript-transcript edges.",
 )
 @click.option(
-    "--grid_connectivity",
-    type=int,
-    default=8,
-    help="Grid connectivity (4 or 8) for grid-based transcript graphs.",
-)
-@click.option(
-    "--within_bin_edges",
-    type=click.Choice(["none", "star"], case_sensitive=False),
-    default="none",
-    help="Within-bin edge strategy for grid graphs.",
-)
-@click.option("--bin_pitch", type=float, default=1.0, help="Bin pitch for grid graph fallbacks.")
+        "--grid_connectivity",
+        type=int,
+        default=8,
+        help="Grid connectivity (4 or 8) for grid-based transcript graphs.",
+    )
+    @click.option(
+        "--within_bin_edges",
+        type=click.Choice(["none", "star"], case_sensitive=False),
+        default="none",
+        help="Within-bin edge strategy for grid graphs.",
+    )
+    @click.option("--bin_pitch", type=float, default=1.0, help="Bin pitch for grid graph fallbacks.")
 def run_segmentation(args: Namespace):
 
     # Setup logging

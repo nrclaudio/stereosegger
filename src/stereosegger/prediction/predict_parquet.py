@@ -19,7 +19,7 @@ from stereosegger.data.utils import (
     create_anndata,
     coo_to_dense_adj,
 )
-from stereosegger.data.tx_graph import build_grid_same_gene_edge_index, build_grid_bin_edge_index
+from stereosegger.data.tx_graph import build_grid_bin_edge_index, build_grid_gene_bin_edge_index
 from stereosegger.training.train import LitSegger
 from stereosegger.training.segger_data_module import SeggerDataModule
 from stereosegger.prediction.boundary import generate_boundaries
@@ -236,9 +236,7 @@ def get_similarity_scores(
         shape = batch[from_type].x.shape[0], batch[to_type].x.shape[0]
 
         if from_type == to_type and tx_graph_mode != "kdtree":
-            if tx_graph_mode == "grid_same_gene":
-                if not hasattr(batch["tx"], "gene_id"):
-                    raise ValueError("tx_graph_mode='grid_same_gene' requires 'tx.gene_id' in the batch.")
+            if tx_graph_mode == "grid_bins":
                 if not hasattr(batch["tx"], "bx") or not hasattr(batch["tx"], "by"):
                     coords = batch["tx"].pos[:, :2].cpu().numpy()
                     bx = np.rint(coords[:, 0] / bin_pitch).astype(int)
@@ -246,23 +244,16 @@ def get_similarity_scores(
                 else:
                     bx = batch["tx"].bx.cpu().numpy()
                     by = batch["tx"].by.cpu().numpy()
-                gene_ids = batch["tx"].gene_id.cpu().numpy()
-                edge_index = build_grid_same_gene_edge_index(
-                    gene_ids,
-                    bx,
-                    by,
-                    connectivity=grid_connectivity,
-                    within_bin_edges=within_bin_edges,
-                )
-            elif tx_graph_mode == "grid_bins":
-                if not hasattr(batch["tx"], "bx") or not hasattr(batch["tx"], "by"):
-                    coords = batch["tx"].pos[:, :2].cpu().numpy()
-                    bx = np.rint(coords[:, 0] / bin_pitch).astype(int)
-                    by = np.rint(coords[:, 1] / bin_pitch).astype(int)
+                
+                if within_bin_edges == "star":
+                     edge_index = build_grid_gene_bin_edge_index(
+                         bx, 
+                         by, 
+                         connectivity=grid_connectivity, 
+                         within_bin_edges=within_bin_edges
+                     )
                 else:
-                    bx = batch["tx"].bx.cpu().numpy()
-                    by = batch["tx"].by.cpu().numpy()
-                edge_index, _ = build_grid_bin_edge_index(bx, by, connectivity=grid_connectivity)
+                     edge_index, _ = build_grid_bin_edge_index(bx, by, connectivity=grid_connectivity)
             else:
                 raise ValueError(f"Unknown tx_graph_mode: {tx_graph_mode}")
 
@@ -663,21 +654,22 @@ def segment(
         for batch in tqdm(loader, desc=f"Processing {loader_name} batches"):
             gpu_id = random.choice(gpu_ids)
             # Call predict_batch for each batch
-            predict_batch(
-                model,
-                batch,
-                score_cut,
-                receptive_field,
-                use_cc=use_cc,
-                knn_method=knn_method,
-                tx_graph_mode=tx_graph_mode,
-                grid_connectivity=grid_connectivity,
-                within_bin_edges=within_bin_edges,
-                bin_pitch=bin_pitch,
-                edge_index_save_path=edge_index_save_path,
-                output_ddf_save_path=output_ddf_save_path,
-                gpu_id=gpu_id,
-            )
+        delayed(predict_batch)(
+            lit_segger,
+            batch,
+            score_cut,
+            receptive_field,
+            use_cc,
+            knn_method,
+            tx_graph_mode,
+            grid_connectivity,
+            within_bin_edges,
+            bin_pitch,
+            str(edge_index_save_path),  # Pass path as string
+            str(output_ddf_save_path),  # Pass path as string
+            gpu_id,
+        )
+        for batch, gpu_id in batch_generator(data_loader, gpu_ids)
 
     if verbose:
         elapsed_time = time() - step_start_time
