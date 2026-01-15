@@ -100,23 +100,16 @@ def main():
     )
 
     # Save (Create) the dataset tiles
-    # Using 'grid_same_gene' with 'star' topology as recommended for Stereo-seq
+    # Using 'grid_bins' with 'star' topology as recommended for Stereo-seq
     sample.save(
         data_dir=dataset_dir,
-        k_bd=3, dist_bd=15.0,  # Boundary connectivity (irrelevant if no labels)
-        k_tx=3, dist_tx=5.0,   # Transcript connectivity (used if kdtree mode)
-        tx_graph_mode="grid_same_gene",
+        k_bd=3,
+        dist_bd=15.0,
+        k_tx=3,
+        dist_tx=5.0,
+        tx_graph_mode="grid_bins",
         grid_connectivity=8,
         within_bin_edges="star",
-        bin_pitch=1.0,
-        allow_missing_boundaries=True, # Important for inference-only runs
-        tile_width=200,
-        tile_height=200,
-        val_prob=0.1,
-        test_prob=0.1,
-        neg_sampling_ratio=5.0,
-        frac=1.0               # Use 100% of the data
-    )
 
     print(f"Dataset created at {dataset_dir}")
 
