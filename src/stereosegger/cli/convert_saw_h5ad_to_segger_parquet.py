@@ -155,9 +155,12 @@ def convert_saw_h5ad_to_parquet(
         transcripts_df["cell_id"] = np.where(assigned_labels > 0, assigned_labels, -1)
         
     else:
-        # If no labels, add dummy columns to match schema requirements
-        transcripts_df["overlaps_nucleus"] = 0
-        transcripts_df["cell_id"] = -1
+        # If no labels, we can't train supervised.
+        # Add dummy columns if needed? Or Segger handles missing?
+        # Segger checks 'can_build_labels'. If false, no edge_label_index.
+        # If we want to run prediction only, this is fine.
+        # If we want to train, we need labels.
+        pass
 
     transcripts_df.to_parquet(out_dir / "transcripts.parquet", index=False)
 

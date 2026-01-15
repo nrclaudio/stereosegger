@@ -97,6 +97,7 @@ def create_dataset(args: Namespace):
         n_workers=args.n_workers,
         sample_type=args.sample_type,
         weights=gene_celltype_abundance_embedding,
+        allow_missing_boundaries=args.allow_missing_boundaries,
     )
 
     # Save Segger dataset

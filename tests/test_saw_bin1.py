@@ -128,7 +128,12 @@ class TestSawBin1(unittest.TestCase):
                 min_count=1,
             )
 
-            sample = STSampleParquet(base_dir=base_dir, sample_type="saw_bin1", n_workers=1)
+            sample = STSampleParquet(
+                base_dir=base_dir, 
+                sample_type="saw_bin1", 
+                n_workers=1,
+                allow_missing_boundaries=True
+            )
             sample.save(
                 data_dir=data_dir,
                 tile_width=100,

@@ -38,6 +38,7 @@ class STSampleParquet:
         n_workers: Optional[int] = 1,
         sample_type: str = None,
         weights: pd.DataFrame = None,
+        allow_missing_boundaries: bool = False,
     ):
         """
         Initializes the STSampleParquet instance.
@@ -50,6 +51,8 @@ class STSampleParquet:
             The number of workers for parallel processing.
         sample_type : Optional[str], default None
             The sample type of the raw data, e.g., 'xenium' or 'merscope'
+        allow_missing_boundaries : bool, optional, default False
+            If True, allows loading datasets without boundary labels (prediction mode).
 
         Raises
         ------
@@ -65,7 +68,7 @@ class STSampleParquet:
         boundaries_fn = self.settings.boundaries.filename
         self._boundaries_filepath = self._base_dir / boundaries_fn
         self.n_workers = n_workers
-        self.allow_missing_boundaries = False
+        self.allow_missing_boundaries = allow_missing_boundaries
 
         # Setup logging
         logging.basicConfig(level=logging.INFO)
@@ -166,10 +169,17 @@ class STSampleParquet:
             If the transcript parquet file does not exist.
         """
         if self._transcripts_metadata is None:
+            # Determine columns to check
+            check_columns = list(self.settings.transcripts.columns)
+            if self.allow_missing_boundaries:
+                # Remove supervision columns from mandatory check
+                optional = ["overlaps_nucleus", "cell_id"]
+                check_columns = [c for c in check_columns if c not in optional]
+
             # Base metadata
             metadata = STSampleParquet._get_parquet_metadata(
                 self._transcripts_filepath,
-                self.settings.transcripts.columns,
+                check_columns,
             )
             # Get filtered unique feature names
             table = pq.read_table(self._transcripts_filepath)
@@ -568,12 +578,22 @@ class STInMemoryDataset:
         """
         # Load and filter transcripts dataframe
         bounds = self.extents.buffer(self.margin, join_style="mitre")
+        
+        # Determine columns to load
+        columns_to_load = list(self.settings.transcripts.columns)
+        if self.allow_missing_boundaries:
+            exclude = [
+                getattr(self.settings.transcripts, "nuclear", "overlaps_nucleus"),
+                getattr(self.settings.transcripts, "cell_id", "cell_id")
+            ]
+            columns_to_load = [c for c in columns_to_load if c not in exclude]
+
         transcripts = utils.read_parquet_region(
             path,
             x=self.settings.transcripts.x,
             y=self.settings.transcripts.y,
             bounds=bounds,
-            extra_columns=self.settings.transcripts.columns,
+            extra_columns=columns_to_load,
         )
         transcripts[self.settings.transcripts.label] = transcripts[self.settings.transcripts.label].apply(
             lambda x: x.decode("utf-8") if isinstance(x, bytes) else x
