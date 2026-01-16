@@ -653,23 +653,21 @@ def segment(
 
         for batch in tqdm(loader, desc=f"Processing {loader_name} batches"):
             gpu_id = random.choice(gpu_ids)
-            # Call predict_batch for each batch
-        delayed(predict_batch)(
-            lit_segger,
-            batch,
-            score_cut,
-            receptive_field,
-            use_cc,
-            knn_method,
-            tx_graph_mode,
-            grid_connectivity,
-            within_bin_edges,
-            bin_pitch,
-            str(edge_index_save_path),  # Pass path as string
-            str(output_ddf_save_path),  # Pass path as string
-            gpu_id,
-        )
-        for batch, gpu_id in batch_generator(data_loader, gpu_ids)
+            predict_batch(
+                lit_segger,
+                batch,
+                score_cut,
+                receptive_field,
+                use_cc,
+                knn_method,
+                tx_graph_mode,
+                grid_connectivity,
+                within_bin_edges,
+                bin_pitch,
+                str(edge_index_save_path),  # Pass path as string
+                str(output_ddf_save_path),  # Pass path as string
+                gpu_id,
+            )
 
     if verbose:
         elapsed_time = time() - step_start_time
