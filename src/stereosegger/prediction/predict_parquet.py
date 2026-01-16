@@ -563,6 +563,14 @@ def predict_batch(
             delayed_write_output_ddf.persist()
 
 
+def batch_generator(loader, gpu_ids):
+    """
+    Yields batches from the loader along with a GPU ID in a round-robin fashion.
+    """
+    for i, batch in enumerate(loader):
+        yield batch, gpu_ids[i % len(gpu_ids)]
+
+
 def segment(
     model: LitSegger,
     dm: SeggerDataModule,
@@ -651,8 +659,9 @@ def segment(
         if verbose:
             print(f"Processing {loader_name} data...")
 
-        for batch in tqdm(loader, desc=f"Processing {loader_name} batches"):
-            gpu_id = random.choice(gpu_ids)
+        for batch, gpu_id in batch_generator(
+            tqdm(loader, desc=f"Processing {loader_name} batches"), gpu_ids
+        ):
             predict_batch(
                 lit_segger,
                 batch,
