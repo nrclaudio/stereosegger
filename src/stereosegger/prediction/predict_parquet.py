@@ -663,7 +663,7 @@ def segment(
             tqdm(loader, desc=f"Processing {loader_name} batches"), gpu_ids
         ):
             predict_batch(
-                lit_segger,
+                model,
                 batch,
                 score_cut,
                 receptive_field,

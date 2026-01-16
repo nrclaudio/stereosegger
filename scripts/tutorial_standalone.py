@@ -110,6 +110,7 @@ def main():
         tx_graph_mode="grid_bins",
         grid_connectivity=8,
         within_bin_edges="star",
+    )
 
     print(f"Dataset created at {dataset_dir}")
 

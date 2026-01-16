@@ -1,4 +1,7 @@
 import unittest
+from unittest.mock import patch, MagicMock
+import os
+from stereosegger.prediction.predict import predict
 import torch
 from segger.prediction.predict import load_model, predict
 from segger.models.segger_model import Segger

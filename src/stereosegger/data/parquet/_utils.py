@@ -108,7 +108,7 @@ def read_parquet_region(
 
     # Find bounds of full file if not supplied
     if bounds is None:
-        bounds = get_xy_bounds(filepath, x, y)
+        bounds = get_xy_extents(filepath, x, y)
 
     # Load pre-filtered data from Parquet file
     filters = [
