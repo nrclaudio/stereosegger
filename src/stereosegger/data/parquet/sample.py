@@ -1495,29 +1495,58 @@ class STTile:
         nuclear_col = getattr(self.settings.transcripts, "nuclear", None)
         boundary_id_col = getattr(self.settings.boundaries, "id", None)
         cell_id_col = getattr(self.settings.transcripts, "cell_id", boundary_id_col)
-        can_build_labels = (
-            tx_graph_mode != "grid_bins"
-            and
-            nuclear_col
-            and boundary_id_col
-            and nuclear_col in self.transcripts.columns
-            and cell_id_col in self.transcripts.columns
-        )
+        
+        can_build_labels = False
+        if tx_graph_mode == "grid_bins":
+             can_build_labels = len(self.boundaries) > 0
+        else:
+             can_build_labels = (
+                nuclear_col
+                and boundary_id_col
+                and nuclear_col in self.transcripts.columns
+                and cell_id_col in self.transcripts.columns
+            )
 
         if not can_build_labels:
             pyg_data[edge_type].edge_index = nbrs_edge_idx
             return pyg_data
 
-        # Find nuclear transcripts
-        tx_cell_ids = self.transcripts[cell_id_col]
-        cell_ids_map = {idx: i for (i, idx) in enumerate(polygons.index)}
-        is_nuclear = self.transcripts[nuclear_col].astype(bool)
-        is_nuclear &= tx_cell_ids.isin(polygons.index)
+        if tx_graph_mode == "grid_bins":
+            # For grid bins, we define "belongs" as the bin center falling inside the cell boundary.
+            # We reuse nbrs_edge_idx (candidates) to reduce search space.
+            tx_indices = nbrs_edge_idx[0].numpy()
+            bd_indices = nbrs_edge_idx[1].numpy()
+            
+            valid_edges = []
+            # Check containment for candidates
+            for i in range(len(tx_indices)):
+                t_idx = tx_indices[i]
+                b_idx = bd_indices[i]
+                
+                # Check if tx_positions[t_idx] is in polygons.iloc[b_idx]
+                pt = shapely.Point(tx_positions[t_idx])
+                poly = polygons.iloc[b_idx]
+                
+                if poly.contains(pt):
+                    valid_edges.append([t_idx, b_idx])
+            
+            if not valid_edges:
+                 blng_edge_idx = torch.tensor([], dtype=torch.long)
+            else:
+                 blng_edge_idx = torch.tensor(valid_edges, dtype=torch.long).t()
 
-        # Set up overlap edges
-        row_idx = np.where(is_nuclear)[0]
-        col_idx = tx_cell_ids.iloc[row_idx].map(cell_ids_map)
-        blng_edge_idx = torch.tensor(np.stack([row_idx, col_idx])).long()
+        else:
+            # Find nuclear transcripts
+            tx_cell_ids = self.transcripts[cell_id_col]
+            cell_ids_map = {idx: i for (i, idx) in enumerate(polygons.index)}
+            is_nuclear = self.transcripts[nuclear_col].astype(bool)
+            is_nuclear &= tx_cell_ids.isin(polygons.index)
+
+            # Set up overlap edges
+            row_idx = np.where(is_nuclear)[0]
+            col_idx = tx_cell_ids.iloc[row_idx].map(cell_ids_map)
+            blng_edge_idx = torch.tensor(np.stack([row_idx, col_idx])).long()
+            
         pyg_data[edge_type].edge_index = blng_edge_idx
 
         # If there are no tx-belongs-bd edges, flag tile as test only (cannot be used for training)
