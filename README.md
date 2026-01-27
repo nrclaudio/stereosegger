@@ -124,14 +124,20 @@ If bypassing the H5AD conversion tools, ensure your input Parquet files adhere t
 
 StereoSegger requires **CUDA 11** or **CUDA 12** for GPU acceleration. The recommended way to install is using `pip` inside a clean environment.
 
-### Option 1: Automated Setup (Recommended for HPC)
+### Option 1: PyPI (Stable)
+If you just want to use the tool without modifying the code:
+```bash
+pip install stereosegger
+```
+
+### Option 2: Automated Setup (Recommended for HPC)
 We provide a setup script (`scripts/setup_segger_env.sh`) that handles CUDA dependencies, RAPIDS, and PyTorch versions automatically. This is the safest way to avoid version conflicts on shared clusters.
 
 ```bash
 bash scripts/setup_segger_env.sh
 ```
 
-### Option 2: Manual Installation
+### Option 3: Manual Installation (Development)
 
 ### Step 1: Create a clean environment
 ```bash
