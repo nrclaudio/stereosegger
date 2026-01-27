@@ -141,8 +141,14 @@ pip install stereosegger
 
 We provide a setup script (`scripts/setup_segger_env.sh`) that handles CUDA dependencies, RAPIDS, and PyTorch versions automatically. This is the safest way to avoid version conflicts on shared clusters.
 
+
+
+To use it, clone the repository and run:
+
 ```bash
+
 bash scripts/setup_segger_env.sh
+
 ```
 
 ### Option 3: Manual Installation (Development)
