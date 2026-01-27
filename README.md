@@ -124,6 +124,15 @@ If bypassing the H5AD conversion tools, ensure your input Parquet files adhere t
 
 StereoSegger requires **CUDA 11** or **CUDA 12** for GPU acceleration. The recommended way to install is using `pip` inside a clean environment.
 
+### Option 1: Automated Setup (Recommended for HPC)
+We provide a setup script (`scripts/setup_segger_env.sh`) that handles CUDA dependencies, RAPIDS, and PyTorch versions automatically. This is the safest way to avoid version conflicts on shared clusters.
+
+```bash
+bash scripts/setup_segger_env.sh
+```
+
+### Option 2: Manual Installation
+
 ### Step 1: Create a clean environment
 ```bash
 # Using conda for isolation
@@ -217,6 +226,7 @@ The graph consists of two distinct node types:
 *   **Boundary Nodes (`bd`):**
     *   **Identity:** Represents a polygon boundary (e.g., a cell or nucleus segmentation).
     *   **Features:** Geometric properties like Area, Convexity, Elongation, and Circularity.
+        *   *Note:* Features like `Area` are log-transformed (`log1p`) during preprocessing to prevent gradient explosion and improve numerical stability during training.
 
 ### 2. Edges (The Connections)
 Information flows between nodes via three types of directed edges:
