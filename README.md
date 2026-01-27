@@ -1,5 +1,7 @@
 # StereoSegger: Fast and Accurate Cell Segmentation for Spatial Omics
 
+> **Note:** This project is heavily inspired by the original **Segger** implementation by Elyas Heidari. You can find the original repository at [EliHei2/segger_dev](https://github.com/EliHei2/segger_dev).
+
 ## Stereo-seq SAW bin1 Quickstart
 
 Convert a SAW bin1 `h5ad` to StereoSegger parquet and build a dataset with grid-based transcript graphs:
