@@ -1,3 +1,4 @@
 include README.md
 include LICENSE
 recursive-include src/stereosegger *.md
+recursive-include src/stereosegger/cli/configs *.yaml
