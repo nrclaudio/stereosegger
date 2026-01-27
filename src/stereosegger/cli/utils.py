@@ -61,7 +61,7 @@ def add_options(
 
         # Load the YAML configuration file
         with open(config_path, "r") as file:
-            config = yaml.safe_load(file.read())
+            config = yaml.safe_load(file.read()) or {}
 
         # Decorate function with all options
         for name, kwargs in reversed(config.items()):
