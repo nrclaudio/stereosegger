@@ -34,5 +34,5 @@ jobs:
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         # Use PYPI_API_TOKEN secret if not using Trusted Publishing
-        # password: ${{ secrets.PYPI_API_TOKEN }}
+        password: ${{ secrets.PYPI_API_TOKEN }}
         print_hash: true
