@@ -469,9 +469,10 @@ class STSampleParquet:
                     k_tx=k_tx,
                     dist_tx=dist_tx,
                     tx_graph_mode=tx_graph_mode,
-                                                    grid_connectivity=grid_connectivity,
-                                                    within_bin_edges=within_bin_edges,
-                                                    bin_pitch=bin_pitch,                    neg_sampling_ratio=neg_sampling_ratio,
+                    grid_connectivity=grid_connectivity,
+                    within_bin_edges=within_bin_edges,
+                    bin_pitch=bin_pitch,
+                    neg_sampling_ratio=neg_sampling_ratio,
                 )
                 if pyg_data is not None:
                     has_labels = hasattr(pyg_data["tx", "belongs", "bd"], "edge_label_index")
@@ -578,13 +579,13 @@ class STInMemoryDataset:
         """
         # Load and filter transcripts dataframe
         bounds = self.extents.buffer(self.margin, join_style="mitre")
-        
+
         # Determine columns to load
         columns_to_load = list(self.settings.transcripts.columns)
         if self.allow_missing_boundaries:
             exclude = [
                 getattr(self.settings.transcripts, "nuclear", "overlaps_nucleus"),
-                getattr(self.settings.transcripts, "cell_id", "cell_id")
+                getattr(self.settings.transcripts, "cell_id", "cell_id"),
             ]
             columns_to_load = [c for c in columns_to_load if c not in exclude]
 
@@ -960,7 +961,7 @@ class STTile:
         outset = self.extents.buffer(self.margin, join_style="mitre")
         xmin, ymin, xmax, ymax = outset.bounds
         x_col, y_col = self.settings.transcripts.xy
-        
+
         # Optimized lookup using KDTree if available
         if hasattr(self.dataset, "kdtree_tx") and self.dataset.kdtree_tx is not None:
             cx, cy = (xmin + xmax) / 2, (ymin + ymax) / 2
@@ -971,7 +972,12 @@ class STTile:
             filtered_transcripts = self.dataset.transcripts.iloc[indices]
             # Secondary check if tile is not a square
             if abs(rx - ry) > 1e-5:
-                mask = (filtered_transcripts[x_col] >= xmin) & (filtered_transcripts[x_col] <= xmax) &                        (filtered_transcripts[y_col] >= ymin) & (filtered_transcripts[y_col] <= ymax)
+                mask = (
+                    (filtered_transcripts[x_col] >= xmin)
+                    & (filtered_transcripts[x_col] <= xmax)
+                    & (filtered_transcripts[y_col] >= ymin)
+                    & (filtered_transcripts[y_col] <= ymax)
+                )
                 filtered_transcripts = filtered_transcripts[mask]
         else:
             mask = self.dataset.transcripts[x_col].between(xmin, xmax)
@@ -1056,10 +1062,10 @@ class STTile:
             # Avoid division by zero
             # Use 1.0 or 0.0 for degenerate cases? 1.0 (square) is probably safe, or 0.
             # Using numpy where to handle series
-            props["elongation"] = rects.area / env_area.replace(0, 1.0) 
+            props["elongation"] = rects.area / env_area.replace(0, 1.0)
             # If area was 0, rects.area is also 0, so 0/1 = 0.
             # Or use np.where
-            
+
         if circularity:
             r = polygons.minimum_bounding_radius()
             # r^2 can be 0 if point
@@ -1288,14 +1294,19 @@ class STTile:
         if tx_graph_mode == "grid_bins":
             bx_col = getattr(self.settings.transcripts, "bx", None)
             by_col = getattr(self.settings.transcripts, "by", None)
-            if not bx_col or not by_col or bx_col not in self.transcripts.columns or by_col not in self.transcripts.columns:
+            if (
+                not bx_col
+                or not by_col
+                or bx_col not in self.transcripts.columns
+                or by_col not in self.transcripts.columns
+            ):
                 raise ValueError("tx_graph_mode='grid_bins' requires 'bx' and 'by' columns in transcripts.")
 
             if within_bin_edges == "star":
                 # Gene-Bin Nodes Strategy: Independent nodes per gene in each bin
                 gene_col = self.settings.transcripts.label
                 grouped = self.transcripts.groupby([bx_col, by_col, gene_col], sort=False)
-                
+
                 count_col = getattr(self.settings.transcripts, "count", None)
                 if count_col and count_col in self.transcripts.columns:
                     total_count = grouped[count_col].sum()
@@ -1307,10 +1318,10 @@ class STTile:
                 bx_vals = keys[bx_col].values
                 by_vals = keys[by_col].values
                 gene_vals = keys[gene_col].values
-                
+
                 x_col = self.settings.transcripts.x
                 y_col = self.settings.transcripts.y
-                
+
                 if x_col in self.transcripts.columns and y_col in self.transcripts.columns:
                     bin_x = grouped[x_col].mean().values
                     bin_y = grouped[y_col].mean().values
@@ -1319,33 +1330,30 @@ class STTile:
                     bin_y = by_vals * bin_pitch
 
                 tx_positions = np.stack([bin_x, bin_y], axis=1)
-                
+
                 # Features: [gene_id, log(count)]
                 # Assuming gene_vals are already integer IDs (which they should be for embedding)
                 # If they are strings, we might have an issue, but sample.py usually assumes mapped integers for embedding.
                 # Let's check if gene_col is numeric. If not, we rely on the embedding mapping which might happen elsewhere?
                 # Actually, `get_transcript_props` uses `self.dataset.sample._transcript_embedding.embed`.
-                # But here we are bypassing that. 
+                # But here we are bypassing that.
                 # Ideally we should use `_transcript_embedding` but grouped.
-                # Since we don't have easy access to the embedding map here without re-implementing, 
+                # Since we don't have easy access to the embedding map here without re-implementing,
                 # let's assume `gene_vals` are the correct integer IDs if the dataset is set up correctly (e.g. via convert script).
-                
+
                 log_counts = np.log1p(total_count.values).astype(np.float32)
                 tx_features = np.stack([gene_vals.astype(np.float32), log_counts], axis=1)
 
                 pyg_data["tx"].id = torch.arange(tx_features.shape[0], dtype=torch.long)
                 pyg_data["tx"].pos = torch.tensor(tx_positions, dtype=torch.float32)
                 pyg_data["tx"].x = torch.tensor(tx_features, dtype=torch.float32)
-                pyg_data["tx"].token_based = torch.tensor(True) # Use embedding
+                pyg_data["tx"].token_based = torch.tensor(True)  # Use embedding
                 pyg_data["tx"].gene_id = torch.tensor(gene_vals.astype(int), dtype=torch.long)
                 pyg_data["tx"].bx = torch.tensor(bx_vals, dtype=torch.long)
                 pyg_data["tx"].by = torch.tensor(by_vals, dtype=torch.long)
 
                 nbrs_edge_idx = build_grid_gene_bin_edge_index(
-                    bx_vals, 
-                    by_vals, 
-                    connectivity=grid_connectivity, 
-                    within_bin_edges=within_bin_edges
+                    bx_vals, by_vals, connectivity=grid_connectivity, within_bin_edges=within_bin_edges
                 )
 
             else:
@@ -1495,12 +1503,12 @@ class STTile:
         nuclear_col = getattr(self.settings.transcripts, "nuclear", None)
         boundary_id_col = getattr(self.settings.boundaries, "id", None)
         cell_id_col = getattr(self.settings.transcripts, "cell_id", boundary_id_col)
-        
+
         can_build_labels = False
         if tx_graph_mode == "grid_bins":
-             can_build_labels = len(self.boundaries) > 0
+            can_build_labels = len(self.boundaries) > 0
         else:
-             can_build_labels = (
+            can_build_labels = (
                 nuclear_col
                 and boundary_id_col
                 and nuclear_col in self.transcripts.columns
@@ -1516,24 +1524,24 @@ class STTile:
             # We reuse nbrs_edge_idx (candidates) to reduce search space.
             tx_indices = nbrs_edge_idx[0].numpy()
             bd_indices = nbrs_edge_idx[1].numpy()
-            
+
             valid_edges = []
             # Check containment for candidates
             for i in range(len(tx_indices)):
                 t_idx = tx_indices[i]
                 b_idx = bd_indices[i]
-                
+
                 # Check if tx_positions[t_idx] is in polygons.iloc[b_idx]
                 pt = shapely.Point(tx_positions[t_idx])
                 poly = polygons.iloc[b_idx]
-                
+
                 if poly.contains(pt):
                     valid_edges.append([t_idx, b_idx])
-            
+
             if not valid_edges:
-                 blng_edge_idx = torch.tensor([], dtype=torch.long)
+                blng_edge_idx = torch.tensor([], dtype=torch.long)
             else:
-                 blng_edge_idx = torch.tensor(valid_edges, dtype=torch.long).t()
+                blng_edge_idx = torch.tensor(valid_edges, dtype=torch.long).t()
 
         else:
             # Find nuclear transcripts
@@ -1546,7 +1554,7 @@ class STTile:
             row_idx = np.where(is_nuclear)[0]
             col_idx = tx_cell_ids.iloc[row_idx].map(cell_ids_map)
             blng_edge_idx = torch.tensor(np.stack([row_idx, col_idx])).long()
-            
+
         pyg_data[edge_type].edge_index = blng_edge_idx
 
         # If there are no tx-belongs-bd edges, flag tile as test only (cannot be used for training)

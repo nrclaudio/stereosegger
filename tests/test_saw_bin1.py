@@ -84,21 +84,21 @@ class TestSawBin1(unittest.TestCase):
             # row 1: [2, 0, 0] -> g0
             # Row 0 and 1 have same coordinates (0,0) and (1,0)? No.
             # coords[0] = (0,0), coords[1] = (1,0)
-            
+
             # Let me adjust mock data to have a bin with 2 genes
             # row 0: (0,0), g0
             # row 1: (0,0), g1 (change this)
-            
+
             adata.X[1, 0] = 0
-            adata.X[1, 1] = 5 # (1,0) now has g1
+            adata.X[1, 1] = 5  # (1,0) now has g1
             # Wait, still different bins.
-            
+
             # (0,0) -> g0, g1
             adata.obsm["spatial"][1] = [0, 0]
             adata.write_h5ad(h5ad_path)
             convert_saw_h5ad_to_parquet(h5ad_path=h5ad_path, out_dir=out_dir)
             transcripts = pd.read_parquet(out_dir / "transcripts.parquet")
-            
+
             bx = transcripts["bx"].to_numpy()
             by = transcripts["by"].to_numpy()
             edge_index = build_grid_gene_bin_edge_index(bx, by, connectivity=4, within_bin_edges="star")
@@ -129,10 +129,7 @@ class TestSawBin1(unittest.TestCase):
             )
 
             sample = STSampleParquet(
-                base_dir=base_dir, 
-                sample_type="saw_bin1", 
-                n_workers=1,
-                allow_missing_boundaries=True
+                base_dir=base_dir, sample_type="saw_bin1", n_workers=1, allow_missing_boundaries=True
             )
             sample.save(
                 data_dir=data_dir,

@@ -66,7 +66,7 @@ def build_grid_gene_bin_edge_index(
     """
     Builds edge index for grid-based gene-bin nodes.
     Each node corresponds to a specific (gene_id, bx, by).
-    
+
     Nodes within the same bin are connected via 'within_bin_edges' strategy.
     Nodes in adjacent bins are connected via 'connectivity' strategy (connecting hubs).
     """
@@ -88,14 +88,14 @@ def build_grid_gene_bin_edge_index(
     # 1. Within-bin edges (Star topology)
     # The first node in the list is the "hub".
     hubs = {}  # Map (x, y) -> hub_node_idx
-    
+
     if within_bin_edges == "star":
         for (x, y), nodes in bin_nodes.items():
             if not nodes:
                 continue
             hub = nodes[0]
             hubs[(x, y)] = hub
-            
+
             # Connect all other nodes to the hub (undirected)
             for other in nodes[1:]:
                 src.extend([hub, other])
@@ -110,7 +110,7 @@ def build_grid_gene_bin_edge_index(
 
     # 2. Between-bin edges (Grid topology between hubs)
     offsets = _grid_offsets(connectivity)
-    
+
     for (x, y), hub_idx in hubs.items():
         for dx, dy in offsets:
             neighbor_hub = hubs.get((x + dx, y + dy))

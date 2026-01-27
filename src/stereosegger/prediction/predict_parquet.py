@@ -244,16 +244,13 @@ def get_similarity_scores(
                 else:
                     bx = batch["tx"].bx.cpu().numpy()
                     by = batch["tx"].by.cpu().numpy()
-                
+
                 if within_bin_edges == "star":
-                     edge_index = build_grid_gene_bin_edge_index(
-                         bx, 
-                         by, 
-                         connectivity=grid_connectivity, 
-                         within_bin_edges=within_bin_edges
-                     )
+                    edge_index = build_grid_gene_bin_edge_index(
+                        bx, by, connectivity=grid_connectivity, within_bin_edges=within_bin_edges
+                    )
                 else:
-                     edge_index, _ = build_grid_bin_edge_index(bx, by, connectivity=grid_connectivity)
+                    edge_index, _ = build_grid_bin_edge_index(bx, by, connectivity=grid_connectivity)
             else:
                 raise ValueError(f"Unknown tx_graph_mode: {tx_graph_mode}")
 
@@ -659,9 +656,7 @@ def segment(
         if verbose:
             print(f"Processing {loader_name} data...")
 
-        for batch, gpu_id in batch_generator(
-            tqdm(loader, desc=f"Processing {loader_name} batches"), gpu_ids
-        ):
+        for batch, gpu_id in batch_generator(tqdm(loader, desc=f"Processing {loader_name} batches"), gpu_ids):
             predict_batch(
                 model,
                 batch,
@@ -689,14 +684,16 @@ def segment(
     # Use Dask to load and process the potentially large results file
     # This avoids OOM by processing partitions one by one
     ddf = dd.read_parquet(output_ddf_save_path)
-    
+
     # Apply reduction per partition to keep only best candidates (drastically reduces size)
     # The result 'candidates' is a Pandas DataFrame
     candidates = ddf.map_partitions(get_best_candidates).compute()
-    
+
     # Final global reduction on the aggregated candidates
-    seg_final_filtered = candidates.sort_values("score", ascending=False).drop_duplicates(subset="transcript_id", keep="first")
-    
+    seg_final_filtered = candidates.sort_values("score", ascending=False).drop_duplicates(
+        subset="transcript_id", keep="first"
+    )
+
     # Clean up intermediate objects
     del candidates
     del ddf
@@ -720,7 +717,7 @@ def segment(
 
     # Outer merge to include all transcripts, even those without assigned cell ids
     transcripts_df_filtered = transcripts_df.merge(seg_final_filtered, on="transcript_id", how="outer")
-    
+
     if verbose:
         elapsed_time = time() - step_start_time
         print(f"Merged segmentation results with transcripts in {elapsed_time:.2f} seconds.")
@@ -810,26 +807,26 @@ def segment(
     if "feature_name" not in transcripts_df_filtered.columns and "gene_id" in transcripts_df_filtered.columns:
         if verbose:
             print("Mapping gene_id to feature_name...")
-        
+
         transcript_path = Path(transcript_file)
         genes_file = transcript_path.parent / "genes.parquet"
-        
+
         if genes_file.exists():
             if verbose:
-                 print(f"Found genes mapping at {genes_file}")
+                print(f"Found genes mapping at {genes_file}")
             try:
                 genes_df = pd.read_parquet(genes_file)
                 if "gene_id" in genes_df.columns and "gene_name" in genes_df.columns:
                     # Merge to get gene_name
                     transcripts_df_filtered = transcripts_df_filtered.merge(
-                        genes_df[["gene_id", "gene_name"]], 
-                        on="gene_id", 
-                        how="left"
+                        genes_df[["gene_id", "gene_name"]], on="gene_id", how="left"
                     )
                     # Rename gene_name to feature_name
                     transcripts_df_filtered = transcripts_df_filtered.rename(columns={"gene_name": "feature_name"})
                     # Fill any missing names with ID if mapping failed for some
-                    transcripts_df_filtered["feature_name"] = transcripts_df_filtered["feature_name"].fillna(transcripts_df_filtered["gene_id"].astype(str))
+                    transcripts_df_filtered["feature_name"] = transcripts_df_filtered["feature_name"].fillna(
+                        transcripts_df_filtered["gene_id"].astype(str)
+                    )
                 else:
                     if verbose:
                         print("genes.parquet columns mismatch, using gene_id as feature_name")

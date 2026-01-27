@@ -44,9 +44,9 @@ python -m segger.cli.train_model \
   --devices 1
 ```
 
-*   `--dataset_dir`: Path to the processed StereoSegger dataset (output of `create_dataset`).
-*   `--models_dir`: Directory where checkpoints and logs will be saved.
-*   `--sample_tag`: Tag used during dataset creation (e.g., sample name).
+- `--dataset_dir`: Path to the processed StereoSegger dataset (output of `create_dataset`).
+- `--models_dir`: Directory where checkpoints and logs will be saved.
+- `--sample_tag`: Tag used during dataset creation (e.g., sample name).
 
 ### 2. Run Segmentation (Predict)
 
@@ -61,64 +61,67 @@ python -m segger.cli.predict \
   --model_version 0
 ```
 
-*   `--segger_data_dir`: Path to the processed StereoSegger dataset.
-*   `--models_dir`: Directory containing the trained model (same as used in training).
-*   `--benchmarks_dir`: Directory to save segmentation results (`.h5ad`, `.csv`, etc.).
-*   `--transcripts_file`: Path to the `transcripts.parquet` file (generated during `convert_saw_h5ad_to_segger_parquet` or dataset creation).
-*   `--model_version`: Version number of the training run (e.g., `0` for `version_0`).
+- `--segger_data_dir`: Path to the processed StereoSegger dataset.
+- `--models_dir`: Directory containing the trained model (same as used in training).
+- `--benchmarks_dir`: Directory to save segmentation results (`.h5ad`, `.csv`, etc.).
+- `--transcripts_file`: Path to the `transcripts.parquet` file (generated during `convert_saw_h5ad_to_segger_parquet` or dataset creation).
+- `--model_version`: Version number of the training run (e.g., `0` for `version_0`).
 
 ---
 
 ## Inputs & Outputs
 
 ### Input Format
+
 StereoSegger relies on a standard H5AD file (AnnData) for Stereo-seq data, which is then converted into intermediate Parquet files.
 
 1.  **Source H5AD:**
-    *   **Expression Matrix (`.X`):** Sparse matrix of gene counts.
-    *   **Coordinates (`.obsm['spatial']`):** (x, y) coordinates of the bins.
-    *   **Variables (`.var`):** Must contain gene names (index or a specific column).
+    - **Expression Matrix (`.X`):** Sparse matrix of gene counts.
+    - **Coordinates (`.obsm['spatial']`):** (x, y) coordinates of the bins.
+    - **Variables (`.var`):** Must contain gene names (index or a specific column).
 
 2.  **Intermediate Parquet:**
     The conversion tool (`convert_saw_h5ad_to_segger_parquet`) generates a directory with:
-    *   `transcripts.parquet`: Contains pseudo-transcripts derived from non-zero bins. Columns: `x`, `y`, `gene_id`, `count`, `bx` (bin x), `by` (bin y).
-    *   `genes.parquet`: Mapping of `gene_id` to `gene_name`.
-    *   `boundaries.parquet` (Optional): Polygon geometries from existing segmentation masks (if provided).
+    - `transcripts.parquet`: Contains pseudo-transcripts derived from non-zero bins. Columns: `x`, `y`, `gene_id`, `count`, `bx` (bin x), `by` (bin y).
+    - `genes.parquet`: Mapping of `gene_id` to `gene_name`.
+    - `boundaries.parquet` (Optional): Polygon geometries from existing segmentation masks (if provided).
 
 ### Output
-1.  **StereoSegger Dataset:**
-    *   A directory of processed PyTorch Geometric graphs (`.pt` files) representing tiled regions of the tissue.
-    *   Nodes: Pseudo-transcripts (with count features) and boundaries (if available).
-    *   Edges: Spatial grid connections (same gene across neighbors) and local co-expression (within-bin).
 
-    *   **Trained Model:**
-    *   PyTorch Lightning checkpoints (`.ckpt`) saved in the `models_dir`.
+1.  **StereoSegger Dataset:**
+    - A directory of processed PyTorch Geometric graphs (`.pt` files) representing tiled regions of the tissue.
+    - Nodes: Pseudo-transcripts (with count features) and boundaries (if available).
+    - Edges: Spatial grid connections (same gene across neighbors) and local co-expression (within-bin).
+
+    - **Trained Model:**
+    - PyTorch Lightning checkpoints (`.ckpt`) saved in the `models_dir`.
 
 ### Data Requirements
+
 If bypassing the H5AD conversion tools, ensure your input Parquet files adhere to these schemas:
 
 1.  **`transcripts.parquet`** (Required):
-    *   One row per detected gene-location (long format).
-    *   **Columns:**
-        *   `transcript_id` (int64): Unique identifier for the transcript node.
-        *   `x`, `y` (float): Spatial coordinates.
-        *   `gene_id` (int32): Integer index corresponding to `genes.parquet`.
-        *   `count` (int32, optional): UMI count for this gene at this location (used for scaling embeddings).
-        *   `bx`, `by` (int32, optional): Grid indices (required if using grid-based graph construction).
-        *   `overlaps_nucleus` (int/bool, optional): 1 if inside a nucleus, 0 otherwise (for supervision).
-        *   `cell_id` (int/str, optional): Ground truth cell assignment (for supervision).
+    - One row per detected gene-location (long format).
+    - **Columns:**
+      - `transcript_id` (int64): Unique identifier for the transcript node.
+      - `x`, `y` (float): Spatial coordinates.
+      - `gene_id` (int32): Integer index corresponding to `genes.parquet`.
+      - `count` (int32, optional): UMI count for this gene at this location (used for scaling embeddings).
+      - `bx`, `by` (int32, optional): Grid indices (required if using grid-based graph construction).
+      - `overlaps_nucleus` (int/bool, optional): 1 if inside a nucleus, 0 otherwise (for supervision).
+      - `cell_id` (int/str, optional): Ground truth cell assignment (for supervision).
 
 2.  **`genes.parquet`** (Required):
-    *   Mapping between integer IDs and gene names.
-    *   **Columns:**
-        *   `gene_id` (int32): Matching `transcripts.parquet`.
-        *   `gene_name` (string): Human-readable gene symbol.
+    - Mapping between integer IDs and gene names.
+    - **Columns:**
+      - `gene_id` (int32): Matching `transcripts.parquet`.
+      - `gene_name` (string): Human-readable gene symbol.
 
 3.  **`boundaries.parquet`** (Optional):
-    *   Polygon geometries for cell/nuclei boundaries.
-    *   **Columns:**
-        *   `boundary_id` (int/str): Unique identifier.
-        *   `geometry` (bytes/binary): WKB (Well-Known Binary) encoded polygon.
+    - Polygon geometries for cell/nuclei boundaries.
+    - **Columns:**
+      - `boundary_id` (int/str): Unique identifier.
+      - `geometry` (bytes/binary): WKB (Well-Known Binary) encoded polygon.
 
 ---
 
@@ -127,12 +130,15 @@ If bypassing the H5AD conversion tools, ensure your input Parquet files adhere t
 StereoSegger requires **CUDA 11** or **CUDA 12** for GPU acceleration. The recommended way to install is using `pip` inside a clean environment.
 
 ### Option 1: PyPI (Stable)
+
 If you just want to use the tool without modifying the code:
+
 ```bash
 pip install stereosegger
 ```
 
 ### Option 2: Automated Setup (Recommended for HPC)
+
 We provide a setup script (`scripts/setup_segger_env.sh`) that handles CUDA dependencies, RAPIDS, and PyTorch versions automatically. This is the safest way to avoid version conflicts on shared clusters.
 
 ```bash
@@ -142,6 +148,7 @@ bash scripts/setup_segger_env.sh
 ### Option 3: Manual Installation (Development)
 
 ### Step 1: Create a clean environment
+
 ```bash
 # Using conda for isolation
 conda create -n stereosegger python=3.10 pip -y
@@ -149,9 +156,11 @@ conda activate stereosegger
 ```
 
 ### Step 2: Install Core Dependencies (PyTorch, RAPIDS, CuPy)
+
 StereoSegger relies on GPU acceleration. We recommend installing the core stack first to ensure compatibility.
 
 **Using Pip (Recommended for Linux/WSL with CUDA 12):**
+
 ```bash
 # 1. Install PyTorch (match your CUDA version, e.g., 12.4)
 pip install torch==2.5.1 torchvision --index-url https://download.pytorch.org/whl/cu124
@@ -166,11 +175,13 @@ pip install torch_scatter torch_sparse torch_cluster torch_spline_conv -f https:
 ```
 
 > **Note:** When using **pip** for RAPIDS, you may need to update your `LD_LIBRARY_PATH` if you encounter import errors (e.g., `libcusolver.so.11: cannot open shared object file`).
+>
 > ```bash
 > export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/path/to/your/env/lib/python3.10/site-packages/nvidia/cusparse/lib:/path/to/your/env/lib/python3.10/site-packages/nvidia/cublas/lib
 > ```
 
 **Using Conda:**
+
 ```bash
 # Install compatible versions of PyTorch, RAPIDS, and CuPy
 conda install -c pytorch -c nvidia -c rapidsai -c conda-forge \
@@ -181,10 +192,10 @@ pip install torch_geometric
 ```
 
 ### Step 3: Install StereoSegger
+
 ```bash
 pip install -e .
 ```
-
 
 ---
 
@@ -208,6 +219,7 @@ Graph mode guidance (`--tx_graph_mode grid_bins`):
 - `within_bin_edges=none`: Aggregates all transcripts in a bin into a single node. Fastest, but loses gene-specific identity in the graph topology (features are just counts). Useful for very high density or quick prototyping.
 
 Other modes:
+
 - `kdtree`: Original behavior for Xenium/MERSCOPE (single-molecule resolution); still supported for SAW if you want distance-based adjacency.
 
 Modeling choices and impact:
@@ -222,32 +234,34 @@ Modeling choices and impact:
 StereoSegger employs a Heterogeneous Graph Attention Network (GATv2) to segment transcripts based on their spatial neighborhood and identity.
 
 ### 1. Nodes (The Graph Components)
+
 The graph consists of two distinct node types:
 
-*   **Transcript Nodes (`tx`):**
-    *   **Identity:** Represents a specific gene detected at a specific spatial location.
-    *   **Resolution:** For Stereo-seq (SAW bin1), each node corresponds to a `(bin, gene)` tuple. If a single bin contains 10 distinct genes, it generates 10 distinct nodes (in "star" mode).
-    *   **Features:**
-        *   **Gene Embedding:** A learnable vector representing the gene identity.
-        *   **UMI Count:** The embedding vector is scaled by `(1 + log(count))` to represent the signal intensity.
+- **Transcript Nodes (`tx`):**
+  - **Identity:** Represents a specific gene detected at a specific spatial location.
+  - **Resolution:** For Stereo-seq (SAW bin1), each node corresponds to a `(bin, gene)` tuple. If a single bin contains 10 distinct genes, it generates 10 distinct nodes (in "star" mode).
+  - **Features:**
+    - **Gene Embedding:** A learnable vector representing the gene identity.
+    - **UMI Count:** The embedding vector is scaled by `(1 + log(count))` to represent the signal intensity.
 
-*   **Boundary Nodes (`bd`):**
-    *   **Identity:** Represents a polygon boundary (e.g., a cell or nucleus segmentation).
-    *   **Features:** Geometric properties like Area, Convexity, Elongation, and Circularity.
-        *   *Note:* Features like `Area` are log-transformed (`log1p`) during preprocessing to prevent gradient explosion and improve numerical stability during training.
+- **Boundary Nodes (`bd`):**
+  - **Identity:** Represents a polygon boundary (e.g., a cell or nucleus segmentation).
+  - **Features:** Geometric properties like Area, Convexity, Elongation, and Circularity.
+    - _Note:_ Features like `Area` are log-transformed (`log1p`) during preprocessing to prevent gradient explosion and improve numerical stability during training.
 
 ### 2. Edges (The Connections)
+
 Information flows between nodes via three types of directed edges:
 
-*   **`tx` $\leftrightarrow$ `tx` (Transcript-Transcript):**
-    *   **Grid Star Topology:**
-        *   **Within Bin:** All gene nodes in a bin connect to a central "hub" node (one of the genes in that bin).
-        *   **Across Bins:** Hub nodes connect to hub nodes of adjacent spatial bins (Grid Adjacency).
-    *   Allows the model to aggregate local co-expression (within bin) and spatial continuity (across bins).
+- **`tx` $\leftrightarrow$ `tx` (Transcript-Transcript):**
+  - **Grid Star Topology:**
+    - **Within Bin:** All gene nodes in a bin connect to a central "hub" node (one of the genes in that bin).
+    - **Across Bins:** Hub nodes connect to hub nodes of adjacent spatial bins (Grid Adjacency).
+  - Allows the model to aggregate local co-expression (within bin) and spatial continuity (across bins).
 
-*   **`tx` $\rightarrow$ `bd` (Transcript-Boundary Neighbors):**
-    *   Connects a transcript to nearby boundaries (potential candidate cells).
-    *   The model uses this edge to decide if the transcript belongs to that boundary.
+- **`tx` $\rightarrow$ `bd` (Transcript-Boundary Neighbors):**
+  - Connects a transcript to nearby boundaries (potential candidate cells).
+  - The model uses this edge to decide if the transcript belongs to that boundary.
 
-*   **`tx` $\rightarrow$ `bd` (Transcript-Boundary Assignment - Supervision):**
-    *   Connects a transcript to the *correct* boundary (Ground Truth) during training.
+- **`tx` $\rightarrow$ `bd` (Transcript-Boundary Assignment - Supervision):**
+  - Connects a transcript to the _correct_ boundary (Ground Truth) during training.

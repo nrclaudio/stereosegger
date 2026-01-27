@@ -31,7 +31,7 @@ class SeggerDataModule(LightningDataModule):
             self.test = STPyGDataset(root=self.data_dir / "test_tiles")
         if self.val is None:
             self.val = STPyGDataset(root=self.data_dir / "val_tiles")
-        
+
         self.loader_kwargs = dict(
             batch_size=self.batch_size,
             num_workers=self.num_workers,

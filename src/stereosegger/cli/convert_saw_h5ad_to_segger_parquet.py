@@ -133,27 +133,26 @@ def convert_saw_h5ad_to_parquet(
         labels = _read_tif(labels_tif)
         boundaries_gdf = _vectorize_labels(labels)
         boundaries_gdf.to_parquet(out_dir / "boundaries.parquet", index=False)
-        
+
         # Spatial Join
         # Create points for transcripts
         # We process in chunks if needed? No, geopandas should handle it or dask-geopandas.
         # But here we use standard geopandas.
-        
+
         # Optimized lookup using labels TIFF directly (much faster than spatial join)
         labels = _read_tif(labels_tif)
         x_idx = np.rint(transcripts_df.x.values).astype(int)
         y_idx = np.rint(transcripts_df.y.values).astype(int)
-        
+
         # Ensure indices are within image bounds
-        valid = (x_idx >= 0) & (x_idx < labels.shape[1]) & \
-                (y_idx >= 0) & (y_idx < labels.shape[0])
-        
+        valid = (x_idx >= 0) & (x_idx < labels.shape[1]) & (y_idx >= 0) & (y_idx < labels.shape[0])
+
         assigned_labels = np.zeros(len(transcripts_df), dtype=int)
         assigned_labels[valid] = labels[y_idx[valid], x_idx[valid]]
-        
+
         transcripts_df["overlaps_nucleus"] = (assigned_labels > 0).astype(int)
         transcripts_df["cell_id"] = np.where(assigned_labels > 0, assigned_labels, -1)
-        
+
     else:
         # If no labels, we can't train supervised.
         # Add dummy columns if needed? Or Segger handles missing?
@@ -164,9 +163,7 @@ def convert_saw_h5ad_to_parquet(
 
     transcripts_df.to_parquet(out_dir / "transcripts.parquet", index=False)
 
-    genes = pd.DataFrame(
-        {"gene_id": np.arange(len(gene_names), dtype=np.int32), "gene_name": gene_names.astype(str)}
-    )
+    genes = pd.DataFrame({"gene_id": np.arange(len(gene_names), dtype=np.int32), "gene_name": gene_names.astype(str)})
     genes.to_parquet(out_dir / "genes.parquet", index=False)
 
 

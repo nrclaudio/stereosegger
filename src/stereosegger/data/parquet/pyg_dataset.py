@@ -23,7 +23,8 @@ class STPyGDataset(Dataset):
         print(f"Indexing dataset at {self.processed_dir}...")
         # Faster than glob.glob for large directories
         paths = [
-            f.path for f in os.scandir(self.processed_dir) 
+            f.path
+            for f in os.scandir(self.processed_dir)
             if f.is_file() and f.name.startswith("tiles_") and f.name.endswith(".pt")
         ]
         self._processed_file_paths = sorted(paths)
