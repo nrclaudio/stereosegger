@@ -144,13 +144,67 @@ python -m stereosegger.cli.predict \
 
 ---
 
-## Architecture & Design Choices
+## Technical Details
 
-### Why Grid Graphs for SAW bin1?
-- **Efficiency:** SAW bin1 data is naturally gridded. Using grid adjacency (neighbors are pixels up/down/left/right) is `O(1)` compared to `O(N log N)` for k-Nearest Neighbors.
-- **Context:** The `star` topology connects all genes within a bin to a central hub, preserving local co-expression while maintaining spatial continuity across the tissue.
+### Stereo-seq SAW bin1 Methodology
 
-### Feature Engineering
-- **Genes:** Learned embeddings for each gene identity.
-- **Counts:** `log1p(count)` is used to scale embeddings, allowing the model to distinguish between low-expression noise and high-expression signal without exploding the graph size.
-- **Boundaries:** If nuclei masks are available, the model computes geometric features (Area, Convexity, Circularity) to guide segmentation. Area is log-transformed to handle the large variance in cell sizes.
+StereoSegger implements specific logic to handle SAW bin1 data efficiently:
+
+- **Regular Grid:** SAW bin1 data is already a regular grid. We leverage this by using grid adjacency (neighbors are pixels up/down/left/right) which is `O(1)` compared to `O(N log N)` for distance-based kNN on pseudo-points.
+- **Consistency:** Grid adjacency keeps local structure consistent with the chip layout and avoids sensitivity to sparsity or count magnitude.
+
+#### Graph Modes & Definitions
+
+1.  **Pseudo-transcript (Gene-Bin Node):**
+    - A node created from a nonzero (bin, gene) entry.
+    - Behavior when `within_bin_edges=star`.
+    - Connects all genes in a bin to a central "hub" gene, and connects hubs across adjacent bins.
+    - **Recommended for SAW** as it preserves gene identity.
+
+2.  **Aggregated Bin Node:**
+    - A node representing an entire spatial bin, aggregating all transcripts within it.
+    - Behavior when `within_bin_edges=none`.
+    - Features are `[log(total_count), log(n_genes)]`.
+    - Fastest, but loses gene-specific identity in the graph topology.
+
+3.  **Grid Adjacency:**
+    - Two bins are neighbors if their integer grid coordinates differ by one step.
+    - `grid_connectivity=4`: Up, Down, Left, Right.
+    - `grid_connectivity=8`: Includes diagonals.
+
+### Architecture
+
+StereoSegger employs a Heterogeneous Graph Attention Network (GATv2) to segment transcripts based on their spatial neighborhood and identity.
+
+#### 1. Nodes (The Graph Components)
+
+The graph consists of two distinct node types:
+
+- **Transcript Nodes (`tx`):**
+  - **Identity:** Represents a specific gene detected at a specific spatial location.
+  - **Resolution:** For Stereo-seq (SAW bin1), each node corresponds to a `(bin, gene)` tuple.
+  - **Features:**
+    - **Gene Embedding:** A learnable vector representing the gene identity.
+    - **UMI Count:** The embedding vector is scaled by `(1 + log(count))` to represent the signal intensity. This allows the model to see expression strength without exploding the number of nodes.
+
+- **Boundary Nodes (`bd`):**
+  - **Identity:** Represents a polygon boundary (e.g., a cell or nucleus segmentation).
+  - **Features:** Geometric properties like Area, Convexity, Elongation, and Circularity.
+    - _Note:_ Features like `Area` are log-transformed (`log1p`) during preprocessing to prevent gradient explosion and improve numerical stability.
+
+#### 2. Edges (The Connections)
+
+Information flows between nodes via three types of directed edges:
+
+- **`tx` $\leftrightarrow$ `tx` (Transcript-Transcript):**
+  - **Grid Star Topology:**
+    - **Within Bin:** All gene nodes in a bin connect to a central "hub" node.
+    - **Across Bins:** Hub nodes connect to hub nodes of adjacent spatial bins.
+  - Allows the model to aggregate local co-expression (within bin) and spatial continuity (across bins).
+
+- **`tx` $\rightarrow$ `bd` (Transcript-Boundary Neighbors):**
+  - Connects a transcript to nearby boundaries (potential candidate cells).
+  - The model uses this edge to decide if the transcript belongs to that boundary.
+
+- **`tx` $\rightarrow$ `bd` (Transcript-Boundary Assignment - Supervision):**
+  - Connects a transcript to the _correct_ boundary (Ground Truth) during training.
