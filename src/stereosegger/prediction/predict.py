@@ -22,7 +22,7 @@ from stereosegger.data.utils import (
 from stereosegger.training.train import LitSegger
 from stereosegger.training.segger_data_module import SeggerDataModule
 from scipy.sparse.csgraph import connected_components as cc
-from typing import Union, Dict
+from typing import Union, Dict, Any
 import dask.dataframe as dd
 from dask import delayed
 from dask.diagnostics import ProgressBar
@@ -180,12 +180,12 @@ def predict_batch(
     receptive_field: Dict[str, float],
     use_cc: bool = True,
     knn_method: str = "cuda",
-) -> tuple[pd.DataFrame, Union[dd.Array, None]]:
+) -> tuple[pd.DataFrame, Any]:
     """
     Predict cell assignments for a batch of transcript data using a segmentation model.
 
     Returns:
-        tuple: (assignments DataFrame, edge_index Dask Array or None)
+        tuple: (assignments DataFrame, edge_index Dask Array/DataFrame or None)
     """
 
     def _get_id():
