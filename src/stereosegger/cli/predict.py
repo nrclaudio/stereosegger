@@ -15,7 +15,7 @@ predict_yml = Path(__file__).parent / "configs" / "predict" / "default.yaml"
 help_msg = "Run the Segger segmentation model."
 
 
-@click.command(name="run_segmentation", help=help_msg)
+@click.command(name="predict", help=help_msg)
 @add_options(config_path=predict_yml)
 @click.option("--segger_data_dir", type=Path, required=True, help="Directory containing the processed Segger dataset.")
 @click.option("--models_dir", type=Path, required=True, help="Directory containing the trained models.")
@@ -34,7 +34,7 @@ help_msg = "Run the Segger segmentation model."
 @click.option("--dist_bd", type=float, default=12.0, help="Distance for boundary computation.")
 @click.option("--k_tx", type=int, default=5, help="K value for transcript computation.")
 @click.option("--dist_tx", type=float, default=5.0, help="Distance for transcript computation.")
-def run_segmentation(args: Namespace):
+def predict(args: Namespace):
 
     # Setup logging
     logging.basicConfig(level=logging.INFO)
@@ -75,4 +75,4 @@ def run_segmentation(args: Namespace):
 
 
 if __name__ == "__main__":
-    run_segmentation()
+    predict()
