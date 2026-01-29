@@ -5,18 +5,16 @@ import scipy.sparse as sp
 from pathlib import Path
 import scanpy as sc
 import geopandas as gpd
-from shapely.geometry import shape, Point
+from shapely.geometry import shape
 
 
 def _read_tif(path: Path) -> np.ndarray:
     try:
         import tifffile
-
         return tifffile.imread(path)
     except ImportError:
         try:
             import imageio.v3 as iio
-
             return iio.imread(path)
         except ImportError as exc:
             msg = "Reading TIFF requires `tifffile` or `imageio`."
@@ -30,7 +28,6 @@ def _vectorize_labels(labels: np.ndarray) -> gpd.GeoDataFrame:
         raise ImportError("Vectorizing labels requires `rasterio`.") from None
 
     records = []
-    # Use cast to int32 for rasterio
     for geom, value in rasterio.features.shapes(labels.astype(np.int32), mask=labels > 0):
         if value == 0:
             continue
@@ -88,7 +85,6 @@ def convert_saw_h5ad_to_parquet(
         top_idx = np.argsort(gene_sums)[::-1][:top_genes]
         adata = adata[:, top_idx].copy()
 
-    # Get gene names
     if gene_name_source in adata.var:
         gene_names = adata.var[gene_name_source].astype(str).values
     else:
@@ -127,42 +123,26 @@ def convert_saw_h5ad_to_parquet(
         }
     )
 
-    # Process boundaries and label transcripts
     if labels_tif is not None:
         print("Vectorizing labels and assigning transcripts...")
         labels = _read_tif(labels_tif)
         boundaries_gdf = _vectorize_labels(labels)
         boundaries_gdf.to_parquet(out_dir / "boundaries.parquet", index=False)
 
-        # Spatial Join
-        # Create points for transcripts
-        # We process in chunks if needed? No, geopandas should handle it or dask-geopandas.
-        # But here we use standard geopandas.
-
-        # Optimized lookup using labels TIFF directly (much faster than spatial join)
-        labels = _read_tif(labels_tif)
         x_idx = np.rint(transcripts_df.x.values).astype(int)
         y_idx = np.rint(transcripts_df.y.values).astype(int)
-
-        # Ensure indices are within image bounds
         valid = (x_idx >= 0) & (x_idx < labels.shape[1]) & (y_idx >= 0) & (y_idx < labels.shape[0])
-
         assigned_labels = np.zeros(len(transcripts_df), dtype=int)
         assigned_labels[valid] = labels[y_idx[valid], x_idx[valid]]
-
+        
+        # ONLY add these columns if we have actual labels
         transcripts_df["overlaps_nucleus"] = (assigned_labels > 0).astype(int)
         transcripts_df["cell_id"] = np.where(assigned_labels > 0, assigned_labels, -1)
-
-    else:
-        # If no labels, we can't train supervised.
-        # Add dummy columns if needed? Or Segger handles missing?
-        # Segger checks 'can_build_labels'. If false, no edge_label_index.
-        # If we want to run prediction only, this is fine.
-        # If we want to train, we need labels.
-        pass
+    
+    # If no labels_tif, boundaries.parquet is NOT generated and transcripts_df 
+    # does NOT get the overlaps_nucleus/cell_id columns.
 
     transcripts_df.to_parquet(out_dir / "transcripts.parquet", index=False)
-
     genes = pd.DataFrame({"gene_id": np.arange(len(gene_names), dtype=np.int32), "gene_name": gene_names.astype(str)})
     genes.to_parquet(out_dir / "genes.parquet", index=False)
 

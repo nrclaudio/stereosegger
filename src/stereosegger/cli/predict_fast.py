@@ -1,66 +1,22 @@
-import click
+import argparse
 from stereosegger.training.segger_data_module import SeggerDataModule
 from stereosegger.prediction.predict_parquet import segment, load_model
-from stereosegger.cli.utils import add_options, CustomFormatter
+from stereosegger.cli.utils import CustomFormatter
 from pathlib import Path
 import logging
-from argparse import Namespace
-import os
 
-# os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
-
-# Path to default YAML configuration file
-predict_yml = Path(__file__).parent / "configs" / "predict" / "default.yaml"
-
-help_msg = "Run the Segger segmentation model."
+help_msg = "Run the Segger segmentation model (fast version)."
 
 
-@click.command(name="run_segmentation", help=help_msg)
-@add_options(config_path=predict_yml)
-@click.option("--segger_data_dir", type=Path, required=True, help="Directory containing the processed Segger dataset.")
-@click.option("--models_dir", type=Path, required=True, help="Directory containing the trained models.")
-@click.option("--benchmarks_dir", type=Path, required=True, help="Directory to save the segmentation results.")
-@click.option("--transcripts_file", type=str, required=True, help="Path to the transcripts file.")
-@click.option("--batch_size", type=int, default=1, help="Batch size for processing.")
-@click.option("--num_workers", type=int, default=0, help="Number of workers for data loading.")
-@click.option("--model_version", type=int, default=0, help="Model version to load.")
-@click.option("--save_tag", type=str, default="segger_segmentation", help="Tag for saving segmentation results.")
-@click.option("--min_transcripts", type=int, default=5, help="Minimum number of transcripts for segmentation.")
-@click.option("--cell_id_col", type=str, default="segger_cell_id", help="Column name for cell IDs.")
-@click.option("--use_cc", type=bool, default=False, help="Use connected components if specified.")
-@click.option("--knn_method", type=str, default="kd_tree", help="Method for KNN computation.")
-@click.option("--file_format", type=str, default="anndata", help="File format for output data.")
-@click.option("--k_bd", type=int, default=3, help="K value for boundary computation.")
-@click.option("--dist_bd", type=float, default=15.0, help="Distance for boundary computation.")
-@click.option("--k_tx", type=int, default=3, help="K value for transcript computation.")
-@click.option("--dist_tx", type=float, default=5.0, help="Distance for transcript computation.")
-@click.option(
-    "--tx_graph_mode",
-    type=click.Choice(["kdtree", "grid_bins"], case_sensitive=False),
-    default="grid_bins",
-    help="Strategy for transcript-transcript edges.",
-)
-@click.option(
-    "--grid_connectivity",
-    type=int,
-    default=8,
-    help="Grid connectivity (4 or 8) for grid-based transcript graphs.",
-)
-@click.option(
-    "--within_bin_edges",
-    type=click.Choice(["none", "star"], case_sensitive=False),
-    default="star",
-    help="Within-bin edge strategy for grid graphs.",
-)
-@click.option("--bin_pitch", type=float, default=1.0, help="Bin pitch for grid graph fallbacks.")
-def run_segmentation(args: Namespace):
-
+def run_segmentation(args):
     # Setup logging
-    logging.basicConfig(level=logging.INFO)
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(CustomFormatter())
+    logging.basicConfig(level=logging.INFO, handlers=[ch])
     logger = logging.getLogger(__name__)
 
     logger.info("Initializing Segger data module...")
-    # Initialize the Lightning data module
     dm = SeggerDataModule(
         data_dir=args.segger_data_dir,
         batch_size=args.batch_size,
@@ -70,7 +26,6 @@ def run_segmentation(args: Namespace):
     dm.setup()
 
     logger.info("Loading the model...")
-    # Load in the latest checkpoint
     model_path = Path(args.models_dir) / "lightning_logs" / f"version_{args.model_version}"
     model = load_model(model_path / "checkpoints")
 
@@ -97,5 +52,48 @@ def run_segmentation(args: Namespace):
     logger.info("Segmentation completed.")
 
 
+def main():
+    parser = argparse.ArgumentParser(description=help_msg)
+    parser.add_argument("--segger_data_dir", type=Path, required=True, help="Directory containing processed dataset.")
+    parser.add_argument("--models_dir", type=Path, required=True, help="Directory containing trained models.")
+    parser.add_argument("--benchmarks_dir", type=Path, required=True, help="Directory to save results.")
+    parser.add_argument("--transcripts_file", type=str, required=True, help="Path to transcripts file.")
+    parser.add_argument("--batch_size", type=int, default=1, help="Batch size.")
+    parser.add_argument("--num_workers", type=int, default=0, help="Number of workers.")
+    parser.add_argument("--model_version", type=int, default=0, help="Model version.")
+    parser.add_argument("--save_tag", type=str, default="segger_segmentation", help="Tag for saving results.")
+    parser.add_argument("--min_transcripts", type=int, default=5, help="Min transcripts per cell.")
+    parser.add_argument("--cell_id_col", type=str, default="segger_cell_id", help="Column for cell IDs.")
+    parser.add_argument("--use_cc", action="store_true", default=False, help="Use connected components.")
+    parser.add_argument("--knn_method", type=str, default="kd_tree", help="KNN method.")
+    parser.add_argument("--file_format", type=str, default="anndata", help="Output format.")
+    parser.add_argument("--k_bd", type=int, default=3, help="K for boundary.")
+    parser.add_argument("--dist_bd", type=float, default=15.0, help="Dist for boundary.")
+    parser.add_argument("--k_tx", type=int, default=3, help="K for transcript.")
+    parser.add_argument("--dist_tx", type=float, default=5.0, help="Dist for transcript.")
+    parser.add_argument(
+        "--tx_graph_mode",
+        choices=["kdtree", "grid_bins"],
+        default="grid_bins",
+        help="Strategy for transcript-transcript edges.",
+    )
+    parser.add_argument(
+        "--grid_connectivity",
+        type=int,
+        default=8,
+        help="Grid connectivity (4 or 8) for grid-based transcript graphs.",
+    )
+    parser.add_argument(
+        "--within_bin_edges",
+        choices=["none", "star"],
+        default="star",
+        help="Within-bin edge strategy for grid graphs.",
+    )
+    parser.add_argument("--bin_pitch", type=float, default=1.0, help="Bin pitch for grid graph fallbacks.")
+
+    args = parser.parse_args()
+    run_segmentation(args)
+
+
 if __name__ == "__main__":
-    run_segmentation()
+    main()

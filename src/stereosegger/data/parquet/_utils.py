@@ -8,7 +8,6 @@ from typing import Optional, List
 import sys
 from types import SimpleNamespace
 from pathlib import Path
-import yaml
 
 
 def get_xy_extents(
@@ -285,50 +284,3 @@ def filter_transcripts(
     if min_qv is not None and "qv" in transcripts_df.columns:
         mask &= transcripts_df["qv"].ge(min_qv)
     return transcripts_df[mask]
-
-
-def load_settings(sample_type: str) -> SimpleNamespace:
-    """
-    Loads a matching YAML file from the _settings/ directory and converts its
-    contents into a SimpleNamespace.
-
-    Parameters
-    ----------
-    sample_type : str
-        Name of the sample type to load (case-insensitive).
-
-    Returns
-    -------
-    SimpleNamespace
-        The settings loaded from the YAML file as a SimpleNamespace.
-
-    Raises
-    ------
-    ValueError
-        If `sample_type` does not match any filenames.
-    """
-    settings_dir = Path(__file__).parent.resolve() / "_settings"
-    # Get a list of YAML filenames (without extensions) in the _settings dir
-    filenames = [file.stem for file in settings_dir.glob("*.yaml")]
-    # Convert sample_type to lowercase and check if it matches any filename
-    sample_type = sample_type.lower()
-    if sample_type not in filenames:
-        msg = f"Sample type '{sample_type}' not found in settings. " f"Available options: {', '.join(filenames)}"
-        raise FileNotFoundError(msg)
-    # Load the matching YAML file
-    yaml_file_path = settings_dir / f"{sample_type}.yaml"
-    with yaml_file_path.open("r") as file:
-        data = yaml.safe_load(file)
-
-    # Convert the YAML data into a SimpleNamespace recursively
-    return _dict_to_namespace(data)
-
-
-def _dict_to_namespace(d):
-    """
-    Recursively converts a dictionary to a SimpleNamespace.
-    """
-    if isinstance(d, dict):
-        d = {k: _dict_to_namespace(v) for k, v in d.items()}
-        return SimpleNamespace(**d)
-    return d

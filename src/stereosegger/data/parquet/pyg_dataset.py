@@ -21,13 +21,18 @@ class STPyGDataset(Dataset):
     ):
         super().__init__(root, transform, pre_transform, pre_filter)
         print(f"Indexing dataset at {self.processed_dir}...")
-        # Faster than glob.glob for large directories
-        paths = [
-            f.path
-            for f in os.scandir(self.processed_dir)
-            if f.is_file() and f.name.startswith("tiles_") and f.name.endswith(".pt")
-        ]
-        self._processed_file_paths = sorted(paths)
+        
+        if not os.path.exists(self.processed_dir):
+            print(f"Warning: Processed directory {self.processed_dir} does not exist.")
+            self._processed_file_paths = []
+        else:
+            # Faster than glob.glob for large directories
+            paths = [
+                f.path
+                for f in os.scandir(self.processed_dir)
+                if f.is_file() and f.name.startswith("tiles_") and f.name.endswith(".pt")
+            ]
+            self._processed_file_paths = sorted(paths)
         print(f"Found {len(self._processed_file_paths)} tiles.")
 
     @property

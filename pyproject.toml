@@ -72,7 +72,7 @@ tests = [
 ]
 
 [project.scripts]
-stereosegger = "stereosegger.cli.cli:stereosegger"
+stereosegger = "stereosegger.cli.cli:main"
 
 [project.urls]
 bug_tracker = "https://github.com/nrclaudio/stereosegger/issues"
