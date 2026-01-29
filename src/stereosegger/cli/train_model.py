@@ -23,14 +23,14 @@ help_msg = "Train the Segger segmentation model."
 @click.option("--out_channels", type=int, default=8, help="Number of output channels.")
 @click.option("--heads", type=int, default=2, help="Number of attention heads.")
 @click.option("--num_mid_layers", type=int, default=2, help="Number of mid layers in the model.")
-@click.option("--batch_size", type=int, default=4, help="Batch size for training.")
-@click.option("--num_workers", type=int, default=4, help="Number of workers for data loading.")
+@click.option("--batch_size", type=int, default=1, help="Batch size for training.")
+@click.option("--num_workers", type=int, default=0, help="Number of workers for data loading.")
 @click.option(
     "--accelerator", type=str, default="cuda", help='Device type to use for training (e.g., "cuda", "cpu").'
 )  # Ask for accelerator
-@click.option("--max_epochs", type=int, default=200, help="Number of epochs for training.")
+@click.option("--max_epochs", type=int, default=300, help="Number of epochs for training.")
 @click.option("--save_best_model", type=bool, default=True, help="Whether to save the best model.")  # unused for now
-@click.option("--learning_rate", type=float, default=1e-3, help="Learning rate for training.")
+@click.option("--learning_rate", type=float, default=1e-4, help="Learning rate for training.")
 @click.option(
     "--pretrained_model_dir",
     type=Path,
@@ -52,6 +52,7 @@ def train_model(args: Namespace):
     # Import packages
     logging.info("Importing packages...")
     import torch
+    import json
     from stereosegger.training.train import LitSegger
     from stereosegger.training.segger_data_module import SeggerDataModule
     from stereosegger.prediction.predict_parquet import load_model
@@ -71,20 +72,52 @@ def train_model(args: Namespace):
     dm.setup()
     logging.info("Done.")
 
+    # Determine num_tx_tokens cleverly
+    num_tx_tokens = args.num_tx_tokens
+    metadata_path = args.dataset_dir / "metadata.json"
+    if metadata_path.exists():
+        with open(metadata_path, "r") as f:
+            metadata = json.load(f)
+            if "num_tx_tokens" in metadata:
+                # If user didn't override the default 500 significantly, or if they didn't provide it
+                # We assume metadata value is better.
+                if args.num_tx_tokens == 500:
+                    num_tx_tokens = metadata["num_tx_tokens"]
+                    logging.info(f"Using num_tx_tokens={num_tx_tokens} from metadata.json")
+
+    # Final safety check: scan first few batches if token based
+    logging.info("Checking dataset for token-based features...")
+    token_flag = getattr(dm.train[0]["tx"], "token_based", None)
+    if token_flag is not None:
+        if torch.is_tensor(token_flag):
+            is_token_based = bool(token_flag.item())
+        else:
+            is_token_based = bool(token_flag)
+    else:
+        is_token_based = dm.train[0].x_dict["tx"].ndim == 1
+
+    if is_token_based:
+        # Check if we need to increase num_tx_tokens based on actual data
+        max_found_token = 0
+        for i in range(min(10, len(dm.train))):
+            tx_x = dm.train[i].x_dict["tx"]
+            if tx_x.ndim == 2 and tx_x.shape[1] == 2:
+                # [token_id, count]
+                current_max = int(tx_x[:, 0].max().item())
+            else:
+                current_max = int(tx_x.max().item())
+            max_found_token = max(max_found_token, current_max)
+        
+        if max_found_token >= num_tx_tokens:
+            num_tx_tokens = max_found_token + 100
+            logging.warning(f"Increased num_tx_tokens to {num_tx_tokens} to accommodate found tokens (max={max_found_token})")
+
     # Initialize model
     if args.pretrained_model_dir is not None:
         logging.info("Loading pretrained model...")
         ls = load_model(args.pretrained_model_dir / "lightning_logs" / f"version_{args.model_version}" / "checkpoints")
     else:
         logging.info("Creating new model...")
-        token_flag = getattr(dm.train[0]["tx"], "token_based", None)
-        if token_flag is not None:
-            if torch.is_tensor(token_flag):
-                is_token_based = bool(token_flag.item())
-            else:
-                is_token_based = bool(token_flag)
-        else:
-            is_token_based = dm.train[0].x_dict["tx"].ndim == 1
         if is_token_based:
             # if the model is token-based, the input is a 1D tensor of token indices
             tx_x = dm.train[0].x_dict["tx"]
@@ -93,7 +126,7 @@ def train_model(args: Namespace):
                 assert tx_x.dtype == torch.long
             else:
                 assert tx_x.shape[1] == 2
-            num_tx_features = args.num_tx_tokens
+            num_tx_features = num_tx_tokens
             print("Using token-based embeddings as node features, number of tokens: ", num_tx_features)
         else:
             # if the model is not token-based, the input is a 2D tensor of scRNAseq embeddings

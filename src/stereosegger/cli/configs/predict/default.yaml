@@ -20,7 +20,7 @@ batch_size:
   help: Batch size for processing.
 num_workers:
   type: int
-  default: 1
+  default: 0
   help: Number of workers for data loading.
 model_version:
   type: int
@@ -28,7 +28,7 @@ model_version:
   help: Model version to load.
 save_tag:
   type: str
-  default: "segger_embedding_1001_0.5"
+  default: "segger_segmentation"
   help: Tag for saving segmentation results.
 min_transcripts:
   type: int
@@ -44,7 +44,7 @@ use_cc:
   help: Use connected components if specified.
 knn_method:
   type: str
-  default: "cuda"
+  default: "kd_tree"
   help: Method for KNN computation.
 file_format:
   type: str
@@ -52,15 +52,15 @@ file_format:
   help: File format for output data.
 k_bd:
   type: int
-  default: 4
+  default: 3
   help: K value for boundary computation.
 dist_bd:
   type: float
-  default: 12
+  default: 15
   help: Distance for boundary computation.
 k_tx:
   type: int
-  default: 5
+  default: 3
   help: K value for transcript computation.
 dist_tx:
   type: float
@@ -68,7 +68,7 @@ dist_tx:
   help: Distance for transcript computation.
 tx_graph_mode:
   type: str
-  default: "kdtree"
+  default: "grid_bins"
   help: Strategy for transcript-transcript edges (kdtree, grid_bins).
 grid_connectivity:
   type: int
@@ -76,7 +76,7 @@ grid_connectivity:
   help: Grid connectivity (4 or 8) for grid-based transcript graphs.
 within_bin_edges:
   type: str
-  default: "none"
+  default: "star"
   help: Within-bin edge strategy for grid graphs.
 bin_pitch:
   type: float

@@ -22,22 +22,22 @@ help_msg = "Run the Segger segmentation model."
 @click.option("--benchmarks_dir", type=Path, required=True, help="Directory to save the segmentation results.")
 @click.option("--transcripts_file", type=str, required=True, help="Path to the transcripts file.")
 @click.option("--batch_size", type=int, default=1, help="Batch size for processing.")
-@click.option("--num_workers", type=int, default=1, help="Number of workers for data loading.")
+@click.option("--num_workers", type=int, default=0, help="Number of workers for data loading.")
 @click.option("--model_version", type=int, default=0, help="Model version to load.")
-@click.option("--save_tag", type=str, default="segger_embedding_1001", help="Tag for saving segmentation results.")
+@click.option("--save_tag", type=str, default="segger_segmentation", help="Tag for saving segmentation results.")
 @click.option("--min_transcripts", type=int, default=5, help="Minimum number of transcripts for segmentation.")
 @click.option("--cell_id_col", type=str, default="segger_cell_id", help="Column name for cell IDs.")
 @click.option("--use_cc", type=bool, default=False, help="Use connected components if specified.")
-@click.option("--knn_method", type=str, default="cuda", help="Method for KNN computation.")
+@click.option("--knn_method", type=str, default="kd_tree", help="Method for KNN computation.")
 @click.option("--file_format", type=str, default="anndata", help="File format for output data.")
-@click.option("--k_bd", type=int, default=4, help="K value for boundary computation.")
-@click.option("--dist_bd", type=float, default=12.0, help="Distance for boundary computation.")
-@click.option("--k_tx", type=int, default=5, help="K value for transcript computation.")
+@click.option("--k_bd", type=int, default=3, help="K value for boundary computation.")
+@click.option("--dist_bd", type=float, default=15.0, help="Distance for boundary computation.")
+@click.option("--k_tx", type=int, default=3, help="K value for transcript computation.")
 @click.option("--dist_tx", type=float, default=5.0, help="Distance for transcript computation.")
 @click.option(
     "--tx_graph_mode",
     type=click.Choice(["kdtree", "grid_bins"], case_sensitive=False),
-    default="kdtree",
+    default="grid_bins",
     help="Strategy for transcript-transcript edges.",
 )
 @click.option(
@@ -49,7 +49,7 @@ help_msg = "Run the Segger segmentation model."
 @click.option(
     "--within_bin_edges",
     type=click.Choice(["none", "star"], case_sensitive=False),
-    default="none",
+    default="star",
     help="Within-bin edge strategy for grid graphs.",
 )
 @click.option("--bin_pitch", type=float, default=1.0, help="Bin pitch for grid graph fallbacks.")

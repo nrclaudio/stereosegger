@@ -48,11 +48,11 @@ help_msg = "Create Segger dataset from spatial transcriptomics data (Xenium or M
 @click.option("--frac", type=float, default=1.0, help="Fraction of the dataset to process.")
 @click.option("--val_prob", type=float, default=0.1, help="Proportion of data for use for validation split.")
 @click.option("--test_prob", type=float, default=0.2, help="Proportion of data for use for test split.")
-@click.option("--n_workers", type=int, default=1, help="Number of workers for parallel processing.")
+@click.option("--n_workers", type=int, default=0, help="Number of workers for parallel processing.")
 @click.option(
     "--tx_graph_mode",
     type=click.Choice(["kdtree", "grid_bins"], case_sensitive=False),
-    default="kdtree",
+    default="grid_bins",
     help="Strategy for transcript-transcript edges.",
 )
 @click.option(
@@ -64,7 +64,7 @@ help_msg = "Create Segger dataset from spatial transcriptomics data (Xenium or M
 @click.option(
     "--within_bin_edges",
     type=click.Choice(["none", "star"], case_sensitive=False),
-    default="none",
+    default="star",
     help="Within-bin edge strategy for grid graphs.",
 )
 @click.option("--bin_pitch", type=float, default=1.0, help="Bin pitch for grid graph fallbacks.")

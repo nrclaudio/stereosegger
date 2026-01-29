@@ -450,6 +450,28 @@ class STSampleParquet:
         data_dir = Path(data_dir)
         STSampleParquet._setup_directory(data_dir)
 
+        # Save metadata
+        import json
+
+        metadata = {
+            "num_tx_tokens": len(self.transcripts_metadata["feature_names"]),
+            "feature_names": self.transcripts_metadata["feature_names"],
+            "k_bd": k_bd,
+            "dist_bd": dist_bd,
+            "k_tx": k_tx,
+            "dist_tx": dist_tx,
+            "tx_graph_mode": tx_graph_mode,
+            "grid_connectivity": grid_connectivity,
+            "within_bin_edges": within_bin_edges,
+            "bin_pitch": bin_pitch,
+            "allow_missing_boundaries": allow_missing_boundaries,
+            "tile_size": tile_size,
+            "tile_width": tile_width,
+            "tile_height": tile_height,
+        }
+        with open(data_dir / "metadata.json", "w") as f:
+            json.dump(metadata, f, indent=4)
+
         # Function to parallelize over workers
         def func(region):
             xm = STInMemoryDataset(sample=self, extents=region, allow_missing_boundaries=allow_missing_boundaries)
