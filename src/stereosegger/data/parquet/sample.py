@@ -59,17 +59,10 @@ class STSampleParquet:
         
         if not self._transcripts_filepath.exists():
             raise FileNotFoundError(f"Transcripts file not found at {self._transcripts_filepath}")
+        
+        # Boundaries are optional at init to allow prediction on unlabeled chips
         if not self._boundaries_filepath.exists():
-            raise FileNotFoundError(f"Boundaries file not found at {self._boundaries_filepath}. Boundaries are mandatory.")
-
-        # STRICT VALIDATION: Check for labels (mandatory)
-        tx_meta = pq.read_metadata(self._transcripts_filepath)
-        cols = tx_meta.schema.names
-        if "overlaps_nucleus" not in cols or "cell_id" not in cols:
-            raise ValueError(
-                f"Data at {base_dir} is unlabeled (missing 'overlaps_nucleus' or 'cell_id'). "
-                "Training/Processing requires labeled data. Please provide a mask during conversion."
-            )
+            logging.warning(f"Boundaries file not found at {self._boundaries_filepath}. This dataset can only be used for prediction, not training.")
 
         self.n_workers = n_workers
         logging.basicConfig(level=logging.INFO)
@@ -86,8 +79,16 @@ class STSampleParquet:
         size_map = {"BOOLEAN": 1, "INT32": 4, "FLOAT": 4, "INT64": 8, "DOUBLE": 8, "BYTE_ARRAY": 8, "INT96": 12}
         metadata = pq.read_metadata(filepath)
         if columns is None: columns = metadata.schema.names
+        # Check if requested columns exist
         missing = set(columns) - set(metadata.schema.names)
-        if len(missing) > 0: raise KeyError(f"Columns {', '.join(missing)} not found in schema for {filepath}.")
+        if len(missing) > 0:
+            # We allow supervision columns to be missing for prediction
+            supervision = {"overlaps_nucleus", "cell_id"}
+            if not missing.issubset(supervision):
+                raise KeyError(f"Mandatory columns {', '.join(missing - supervision)} not found in {filepath}.")
+            # Return metadata for found columns only
+            columns = [c for c in columns if c in metadata.schema.names]
+
         summary = {"n_rows": metadata.num_rows, "n_columns": len(columns), "column_sizes": {}}
         for c in columns:
             i = metadata.schema.names.index(c)
@@ -98,7 +99,12 @@ class STSampleParquet:
     @cached_property
     def transcripts_metadata(self):
         if self._transcripts_metadata is None:
-            check_columns = list(self.settings.transcripts.columns) + ["overlaps_nucleus", "cell_id"]
+            # We try to load supervision columns if they exist
+            check_columns = list(self.settings.transcripts.columns)
+            available = pq.read_metadata(self._transcripts_filepath).schema.names
+            if "overlaps_nucleus" in available: check_columns.append("overlaps_nucleus")
+            if "cell_id" in available: check_columns.append("cell_id")
+            
             metadata = STSampleParquet._get_parquet_metadata(self._transcripts_filepath, check_columns)
             table = pq.read_table(self._transcripts_filepath)
             names = pc.unique(table[self.settings.transcripts.label])
@@ -120,6 +126,8 @@ class STSampleParquet:
     @cached_property
     def boundaries_metadata(self):
         if self._boundaries_metadata is None:
+            if not self._boundaries_filepath.exists():
+                return {"n_rows": 0, "n_columns": 0, "column_sizes": {}}
             self._boundaries_metadata = STSampleParquet._get_parquet_metadata(self._boundaries_filepath, self.settings.boundaries.columns)
         return self._boundaries_metadata
 
@@ -130,8 +138,11 @@ class STSampleParquet:
     def extents(self):
         if self._extents is None:
             tx_extents = utils.get_xy_extents(self._transcripts_filepath, *self.settings.transcripts.xy)
-            boundaries = gpd.read_parquet(self._boundaries_filepath, columns=[self.settings.boundaries.geometry])
-            bd_extents = shapely.box(*boundaries.geometry.total_bounds) if len(boundaries) > 0 else None
+            bd_extents = None
+            if self._boundaries_filepath.exists():
+                boundaries = gpd.read_parquet(self._boundaries_filepath, columns=[self.settings.boundaries.geometry])
+                if len(boundaries) > 0:
+                    bd_extents = shapely.box(*boundaries.geometry.total_bounds)
             extents = tx_extents if bd_extents is None else tx_extents.union(bd_extents)
             self._extents = shapely.box(*extents.bounds)
         return self._extents
@@ -158,7 +169,12 @@ class STSampleParquet:
             tiles = xm._tile(kwargs.get("tile_width"), kwargs.get("tile_height"), kwargs.get("tile_size"))
             if kwargs.get("frac", 1.0) < 1: tiles = random.sample(tiles, int(len(tiles) * kwargs.get("frac")))
             for tile in tiles:
-                data_type = np.random.choice(["train_tiles", "test_tiles", "val_tiles"], p=[1-(kwargs.get("test_prob",0.2)+kwargs.get("val_prob",0.1)), kwargs.get("test_prob",0.2), kwargs.get("val_prob",0.1)])
+                # If no boundaries exist, everything goes to test_tiles
+                if not self._boundaries_filepath.exists():
+                    data_type = "test_tiles"
+                else:
+                    data_type = np.random.choice(["train_tiles", "test_tiles", "val_tiles"], p=[1-(kwargs.get("test_prob",0.2)+kwargs.get("val_prob",0.1)), kwargs.get("test_prob",0.2), kwargs.get("val_prob",0.1)])
+                
                 xt = STTile(dataset=xm, extents=tile)
                 pyg_data = xt.to_pyg_dataset(k_bd=k_bd, dist_bd=dist_bd, k_tx=k_tx, dist_tx=dist_tx, tx_graph_mode=tx_graph_mode, neg_sampling_ratio=kwargs.get("neg_sampling_ratio", 5))
                 if pyg_data is not None: torch.save(pyg_data, data_dir / data_type / "processed" / f"{xt.uid}.pt")
@@ -169,9 +185,19 @@ class STSampleParquet:
 class STInMemoryDataset:
     def __init__(self, sample, extents, margin=10):
         self.sample, self.extents, self.margin, self.settings = sample, extents, margin, sample.settings
-        load_tx_cols = list(self.settings.transcripts.columns) + ["overlaps_nucleus", "cell_id"]
+        
+        available = pq.read_metadata(sample._transcripts_filepath).schema.names
+        load_tx_cols = list(self.settings.transcripts.columns)
+        if "overlaps_nucleus" in available: load_tx_cols.append("overlaps_nucleus")
+        if "cell_id" in available: load_tx_cols.append("cell_id")
+
         self.transcripts = utils.read_parquet_region(sample._transcripts_filepath, self.settings.transcripts.x, self.settings.transcripts.y, extents.buffer(margin), extra_columns=load_tx_cols)
-        self.boundaries = utils.read_parquet_region(sample._boundaries_filepath, None, None, extents.buffer(margin), extra_columns=self.settings.boundaries.columns)
+        
+        if sample._boundaries_filepath.exists():
+            self.boundaries = utils.read_parquet_region(sample._boundaries_filepath, None, None, extents.buffer(margin), extra_columns=self.settings.boundaries.columns)
+        else:
+            self.boundaries = pd.DataFrame(columns=self.settings.boundaries.columns)
+            
         xy = self.transcripts[[self.settings.transcripts.x, self.settings.transcripts.y]].values
         self.kdtree_tx = KDTree(xy) if len(xy) > 0 else None
 
@@ -220,9 +246,14 @@ class STTile:
         pyg_data["tx"].pos = torch.tensor(tx_positions, dtype=torch.float32)
         pyg_data["tx", "neighbors", "tx"].edge_index = nbrs_edge_idx
 
-        # Boundaries
+        # Boundaries (Allow empty for prediction)
         bd = self.dataset.boundaries[self.dataset.boundaries.geometry.intersects(outset)]
-        if len(bd) == 0: return None
+        if len(bd) == 0:
+            # For inference, empty bd is okay
+            pyg_data["bd"].pos = torch.empty((0, 2), dtype=torch.float32)
+            pyg_data["bd"].x = torch.empty((0, 2), dtype=torch.float32)
+            pyg_data["tx", "neighbors", "bd"].edge_index = torch.empty((2, 0), dtype=torch.long)
+            return pyg_data
         
         polygons = gpd.GeoSeries(bd[self.settings.boundaries.geometry])
         polygons.index = bd[self.settings.boundaries.id].values
@@ -237,15 +268,16 @@ class STTile:
         e = np.argwhere(dist != np.inf).T; e[1] = idx[dist != np.inf]
         pyg_data["tx", "neighbors", "bd"].edge_index = torch.tensor(e, dtype=torch.long).contiguous()
         
-        # Ground Truth "Belongs" Edges
-        cell_ids_map = {idx: i for (i, idx) in enumerate(polygons.index)}
-        is_nuclear = tx["overlaps_nucleus"].astype(bool) & tx["cell_id"].isin(polygons.index)
-        row_idx = np.where(is_nuclear)[0]
-        col_idx = tx["cell_id"].iloc[row_idx].map(cell_ids_map).values
-        blng_edge_idx = torch.tensor(np.stack([row_idx, col_idx])).long()
-        
-        if blng_edge_idx.numel() == 0: return None
-        pyg_data["tx", "belongs", "bd"].edge_index = blng_edge_idx
-        pyg_data, _, _ = RandomLinkSplit(num_val=0, num_test=0, is_undirected=True, edge_types=[("tx", "belongs", "bd")], neg_sampling_ratio=neg_sampling_ratio)(pyg_data)
+        # Ground Truth "Belongs" Edges (Only if columns exist)
+        if "overlaps_nucleus" in tx.columns and "cell_id" in tx.columns:
+            cell_ids_map = {idx: i for (i, idx) in enumerate(polygons.index)}
+            is_nuclear = tx["overlaps_nucleus"].astype(bool) & tx["cell_id"].isin(polygons.index)
+            row_idx = np.where(is_nuclear)[0]
+            col_idx = tx["cell_id"].iloc[row_idx].map(cell_ids_map).values
+            blng_edge_idx = torch.tensor(np.stack([row_idx, col_idx])).long()
+            
+            if blng_edge_idx.numel() > 0:
+                pyg_data["tx", "belongs", "bd"].edge_index = blng_edge_idx
+                pyg_data, _, _ = RandomLinkSplit(num_val=0, num_test=0, is_undirected=True, edge_types=[("tx", "belongs", "bd")], neg_sampling_ratio=neg_sampling_ratio)(pyg_data)
         
         return pyg_data

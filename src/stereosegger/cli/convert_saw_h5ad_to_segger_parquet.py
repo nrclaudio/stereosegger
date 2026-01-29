@@ -1,4 +1,4 @@
-import click
+import argparse
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
@@ -51,6 +51,7 @@ def convert_saw_h5ad_to_parquet(
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    print(f"Reading {h5ad_path}...")
     adata = sc.read_h5ad(h5ad_path)
 
     if "spatial" in adata.obsm:
@@ -135,52 +136,39 @@ def convert_saw_h5ad_to_parquet(
         assigned_labels = np.zeros(len(transcripts_df), dtype=int)
         assigned_labels[valid] = labels[y_idx[valid], x_idx[valid]]
         
-        # ONLY add these columns if we have actual labels
         transcripts_df["overlaps_nucleus"] = (assigned_labels > 0).astype(int)
         transcripts_df["cell_id"] = np.where(assigned_labels > 0, assigned_labels, -1)
     
-    # If no labels_tif, boundaries.parquet is NOT generated and transcripts_df 
-    # does NOT get the overlaps_nucleus/cell_id columns.
-
     transcripts_df.to_parquet(out_dir / "transcripts.parquet", index=False)
     genes = pd.DataFrame({"gene_id": np.arange(len(gene_names), dtype=np.int32), "gene_name": gene_names.astype(str)})
     genes.to_parquet(out_dir / "genes.parquet", index=False)
 
 
-@click.command(name="convert_saw_h5ad_to_segger_parquet")
-@click.option("--h5ad", "h5ad_path", type=Path, required=True, help="Path to SAW bin1 h5ad file.")
-@click.option("--out_dir", type=Path, required=True, help="Output directory for Segger parquet files.")
-@click.option("--bin_pitch", type=float, default=1.0, help="Bin pitch for rounding to grid coordinates.")
-@click.option("--min_count", type=int, default=1, help="Minimum count to keep a bin-gene entry.")
-@click.option("--labels_tif", type=Path, default=None, help="Optional label TIFF for boundary polygons.")
-@click.option("--tissue_mask_tif", type=Path, default=None, help="Optional tissue mask TIFF.")
-@click.option("--bbox", type=float, nargs=4, default=None, help="Bounding box xmin xmax ymin ymax.")
-@click.option("--gene_name_source", type=str, default="real_gene_name", help="Column in adata.var for gene names.")
-@click.option("--top_genes", type=int, default=None, help="Keep only top K genes by total counts.")
-@click.option("--max_nnz", type=int, default=None, help="Debug: cap number of non-zero entries.")
-def main(
-    h5ad_path: Path,
-    out_dir: Path,
-    bin_pitch: float,
-    min_count: int,
-    labels_tif: Path | None,
-    tissue_mask_tif: Path | None,
-    bbox: tuple[float, float, float, float] | None,
-    gene_name_source: str,
-    top_genes: int | None,
-    max_nnz: int | None,
-):
+def main():
+    parser = argparse.ArgumentParser(description="Convert Stereo-seq SAW H5AD to Parquet")
+    parser.add_argument("--h5ad", type=Path, required=True, help="Path to SAW bin1 h5ad file.")
+    parser.add_argument("--out_dir", type=Path, required=True, help="Output directory for Segger parquet files.")
+    parser.add_argument("--bin_pitch", type=float, default=1.0, help="Bin pitch for rounding to grid coordinates.")
+    parser.add_argument("--min_count", type=int, default=1, help="Minimum count to keep a bin-gene entry.")
+    parser.add_argument("--labels_tif", type=Path, default=None, help="Optional label TIFF for boundary polygons.")
+    parser.add_argument("--tissue_mask_tif", type=Path, default=None, help="Optional tissue mask TIFF.")
+    parser.add_argument("--bbox", type=float, nargs=4, default=None, help="Bounding box xmin xmax ymin ymax.")
+    parser.add_argument("--gene_name_source", type=str, default="real_gene_name", help="Column in adata.var for gene names.")
+    parser.add_argument("--top_genes", type=int, default=None, help="Keep only top K genes by total counts.")
+    parser.add_argument("--max_nnz", type=int, default=None, help="Debug: cap number of non-zero entries.")
+
+    args = parser.parse_args()
     convert_saw_h5ad_to_parquet(
-        h5ad_path=h5ad_path,
-        out_dir=out_dir,
-        bin_pitch=bin_pitch,
-        min_count=min_count,
-        labels_tif=labels_tif,
-        tissue_mask_tif=tissue_mask_tif,
-        bbox=bbox,
-        gene_name_source=gene_name_source,
-        top_genes=top_genes,
-        max_nnz=max_nnz,
+        h5ad_path=args.h5ad,
+        out_dir=args.out_dir,
+        bin_pitch=args.bin_pitch,
+        min_count=args.min_count,
+        labels_tif=args.labels_tif,
+        tissue_mask_tif=args.tissue_mask_tif,
+        bbox=args.bbox,
+        gene_name_source=args.gene_name_source,
+        top_genes=args.top_genes,
+        max_nnz=args.max_nnz,
     )
 
 

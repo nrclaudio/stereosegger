@@ -36,6 +36,19 @@ def train_model(args):
     dm.setup()
     logging.info("Done.")
 
+    # Check for unlabeled data (Stop training if no labels found)
+    if dm.train is None or len(dm.train) == 0:
+        raise ValueError(f"No training tiles found in {args.dataset_dir}. Did you run create_dataset on unlabeled data?")
+    
+    # Check first tile for labels
+    first_tile = dm.train[0]
+    if not hasattr(first_tile["tx", "belongs", "bd"], "edge_label_index"):
+        raise ValueError(
+            f"The dataset at {args.dataset_dir} does not contain training labels (belongs edges). "
+            "Training requires labeled data. Please ensure boundaries.parquet and supervision columns "
+            "were provided during dataset creation."
+        )
+
     # Determine num_tx_tokens
     num_tx_tokens = args.num_tx_tokens
     metadata_path = args.dataset_dir / "metadata.json"
