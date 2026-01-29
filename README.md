@@ -132,11 +132,11 @@ Creates the graph-based dataset used for training and inference.
 - `--base_dir PATH`: Directory containing raw parquet files. **(Required)**
 - `--data_dir PATH`: Directory to save the processed dataset. **(Required)**
 - `--sample_type TEXT`: e.g., `"xenium"`, `"merscope"`, `"saw_bin1"`.
-- `--tx_graph_mode [kdtree|grid_bins]`: Strategy for transcript edges. Default: `"kdtree"`.
+- `--tx_graph_mode [kdtree|grid_bins]`: Strategy for transcript edges. Default: `"grid_bins"`.
 - `--grid_connectivity INT`: Grid connectivity (4 or 8). Default: `8`.
-- `--within_bin_edges [none|star]`: Within-bin edge strategy. Default: `"none"`.
+- `--within_bin_edges [none|star]`: Within-bin edge strategy. Default: `"star"`.
 - `--tile_size INT`: Size of the spatial tiles.
-- `--n_workers INT`: Number of parallel workers. Default: `1`.
+- `--n_workers INT`: Number of parallel workers. Default: `0` (serial).
 
 ### 3. `train_model`
 Trains the Segger segmentation model.
@@ -145,11 +145,11 @@ Trains the Segger segmentation model.
 - `--dataset_dir PATH`: Directory containing the processed dataset. **(Required)**
 - `--models_dir PATH`: Directory to save the model and logs. **(Required)**
 - `--sample_tag TEXT`: Unique tag for the sample. **(Required)**
-- `--batch_size INT`: Training batch size. Default: `4`.
-- `--max_epochs INT`: Number of training epochs. Default: `200`.
+- `--batch_size INT`: Training batch size. Default: `1`.
+- `--max_epochs INT`: Number of training epochs. Default: `300`.
 - `--accelerator TEXT`: `"cuda"` or `"cpu"`. Default: `"cuda"`.
 - `--devices INT`: Number of GPUs to use. Default: `4`.
-- `--learning_rate FLOAT`: Learning rate. Default: `1e-3`.
+- `--learning_rate FLOAT`: Learning rate. Default: `1e-4`.
 
 ### 4. `predict` / `predict_fast`
 Runs the segmentation inference. `predict_fast` is optimized for large grid-based datasets.
@@ -160,6 +160,9 @@ Runs the segmentation inference. `predict_fast` is optimized for large grid-base
 - `--benchmarks_dir PATH`: Output results directory. **(Required)**
 - `--transcripts_file PATH`: Original transcripts parquet file. **(Required)**
 - `--model_version INT`: Version of the model to load. Default: `0`.
+- `--tx_graph_mode [kdtree|grid_bins]`: Strategy for transcript edges. Default: `"grid_bins"`.
+- `--grid_connectivity INT`: Grid connectivity (4 or 8). Default: `8`.
+- `--within_bin_edges [none|star]`: Within-bin edge strategy. Default: `"star"`.
 - `--use_cc BOOL`: Use connected components for unassigned transcripts. Default: `False`.
 - `--file_format TEXT`: Output format (`"anndata"`, `"parquet"`, `"csv"`). Default: `"anndata"`.
 - `--k_bd` / `--dist_bd`: Boundary neighborhood parameters.
