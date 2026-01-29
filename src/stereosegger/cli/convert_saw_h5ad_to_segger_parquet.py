@@ -150,7 +150,7 @@ def main():
     parser.add_argument("--out_dir", type=Path, required=True, help="Output directory for Segger parquet files.")
     parser.add_argument("--bin_pitch", type=float, default=1.0, help="Bin pitch for rounding to grid coordinates.")
     parser.add_argument("--min_count", type=int, default=1, help="Minimum count to keep a bin-gene entry.")
-    parser.add_argument("--labels_tif", type=Path, default=None, help="Optional label TIFF for boundary polygons.")
+    parser.add_argument("--labels_tif", type=Path, default=None, help="Label TIFF for boundary polygons. Mandatory for training workflows, skip for whole-chip prediction.")
     parser.add_argument("--tissue_mask_tif", type=Path, default=None, help="Optional tissue mask TIFF.")
     parser.add_argument("--bbox", type=float, nargs=4, default=None, help="Bounding box xmin xmax ymin ymax.")
     parser.add_argument("--gene_name_source", type=str, default="real_gene_name", help="Column in adata.var for gene names.")

@@ -47,23 +47,37 @@ The core pipeline expects a directory containing:
 
 ---
 
-## Quickstart: Stereo-seq SAW bin1
-
 ### 1. Prepare Data
 
-```bash
-# 1. Convert H5AD to Parquet
-stereosegger convert_saw \
-  --h5ad C04895D5_tissue.h5ad \
-  --out_dir ./raw_data
+#### Path A: For Training (Kidneys)
+Training requires ground-truth labels. You **must** provide a label TIFF (e.g., `ssdna_mask`).
 
-# 2. Build Graph Dataset
+```bash
+# 1. Convert with labels
+stereosegger convert_saw \
+  --h5ad kidney_sample.h5ad \
+  --labels_tif ssdna_mask.tif \
+  --out_dir ./raw_data_labeled
+
+# 2. Build Dataset
 stereosegger create_dataset \
-  --base_dir ./raw_data \
-  --data_dir ./processed_dataset \
-  --tx_graph_mode grid_bins \
-  --grid_connectivity 8 \
-  --within_bin_edges star
+  --base_dir ./raw_data_labeled \
+  --data_dir ./dataset_labeled
+```
+
+#### Path B: For Prediction (Whole Chip)
+Prediction on new data uses a pre-trained model and does not require a mask.
+
+```bash
+# 1. Convert without labels
+stereosegger convert_saw \
+  --h5ad whole_chip.h5ad \
+  --out_dir ./raw_data_unlabeled
+
+# 2. Build Dataset
+stereosegger create_dataset \
+  --base_dir ./raw_data_unlabeled \
+  --data_dir ./dataset_unlabeled
 ```
 
 ### 2. Train Model (Requires Labeled Data)
