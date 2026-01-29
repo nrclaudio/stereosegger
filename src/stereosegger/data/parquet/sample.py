@@ -60,9 +60,15 @@ class STSampleParquet:
         if not self._transcripts_filepath.exists():
             raise FileNotFoundError(f"Transcripts file not found at {self._transcripts_filepath}")
         
-        # Boundaries are optional at init to allow prediction on unlabeled chips
-        if not self._boundaries_filepath.exists():
-            logging.warning(f"Boundaries file not found at {self._boundaries_filepath}. This dataset can only be used for prediction, not training.")
+        # MODE LOGGING: Explicitly state if this is for Training or Inference
+        tx_meta = pq.read_metadata(self._transcripts_filepath)
+        cols = tx_meta.schema.names
+        has_labels = "overlaps_nucleus" in cols and "cell_id" in cols and self._boundaries_filepath.exists()
+        
+        if has_labels:
+            print(">>> MODE: TRAINING. Labeled data found. Dataset will include ground-truth edges.")
+        else:
+            print(">>> MODE: INFERENCE. No labels/boundaries found. Dataset will be inference-only (no ground-truth).")
 
         self.n_workers = n_workers
         logging.basicConfig(level=logging.INFO)
@@ -160,8 +166,22 @@ class STSampleParquet:
     def save(self, data_dir, k_bd=3, dist_bd=15, k_tx=3, dist_tx=5, tx_graph_mode="kdtree", **kwargs):
         data_dir = Path(data_dir)
         STSampleParquet._setup_directory(data_dir)
+        # Save metadata
         import json
-        metadata = {"num_tx_tokens": len(self.transcripts_metadata["feature_names"]), "feature_names": self.transcripts_metadata["feature_names"], "k_bd": k_bd, "dist_bd": dist_bd, "k_tx": k_tx, "dist_tx": dist_tx, "tx_graph_mode": tx_graph_mode}
+        tx_meta = pq.read_metadata(self._transcripts_filepath)
+        has_labels = "overlaps_nucleus" in tx_meta.schema.names and "cell_id" in tx_meta.schema.names and self._boundaries_filepath.exists()
+        mode = "training" if has_labels else "inference"
+        
+        metadata = {
+            "num_tx_tokens": len(self.transcripts_metadata["feature_names"]),
+            "feature_names": self.transcripts_metadata["feature_names"],
+            "k_bd": k_bd,
+            "dist_bd": dist_bd,
+            "k_tx": k_tx,
+            "dist_tx": dist_tx,
+            "tx_graph_mode": tx_graph_mode,
+            "dataset_mode": mode
+        }
         with open(data_dir / "metadata.json", "w") as f: json.dump(metadata, f, indent=4)
 
         def func(region):

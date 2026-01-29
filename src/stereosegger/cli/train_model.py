@@ -55,6 +55,14 @@ def train_model(args):
     if metadata_path.exists():
         with open(metadata_path, "r") as f:
             metadata = json.load(f)
+            
+            # BLOCK TRAINING ON INFERENCE-ONLY DATA
+            if metadata.get("dataset_mode") == "inference":
+                raise ValueError(
+                    f"The dataset at {args.dataset_dir} was created in INFERENCE mode (no labels). "
+                    "You cannot train on this dataset. Please recreate the dataset with labeled data."
+                )
+
             if "num_tx_tokens" in metadata:
                 if args.num_tx_tokens == 500:
                     num_tx_tokens = metadata["num_tx_tokens"]
