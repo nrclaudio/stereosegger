@@ -1054,23 +1054,19 @@ class STTile:
             # Log-transform area to prevent exploding gradients
             props["area"] = np.log1p(polygons.area)
         if convexity:
-            # Safe division for convexity
-            props["convexity"] = polygons.convex_hull.area / polygons.area.replace(0, 1.0)
+            # Safe division for convexity with epsilon
+            props["convexity"] = polygons.convex_hull.area / (polygons.area + 1e-6)
         if elongation:
             rects = polygons.minimum_rotated_rectangle()
             env_area = polygons.envelope.area
-            # Avoid division by zero
-            # Use 1.0 or 0.0 for degenerate cases? 1.0 (square) is probably safe, or 0.
-            # Using numpy where to handle series
-            props["elongation"] = rects.area / env_area.replace(0, 1.0)
-            # If area was 0, rects.area is also 0, so 0/1 = 0.
-            # Or use np.where
+            # Avoid division by zero with epsilon
+            props["elongation"] = rects.area / (env_area + 1e-6)
 
         if circularity:
             r = polygons.minimum_bounding_radius()
-            # r^2 can be 0 if point
-            r2 = r**2
-            props["circularity"] = polygons.area / r2.replace(0, 1.0)
+            # r^2 can be 0 if point, adding epsilon
+            r2 = r**2 + 1e-6
+            props["circularity"] = polygons.area / r2
 
         return props
 

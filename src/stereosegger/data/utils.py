@@ -154,18 +154,32 @@ def create_anndata(
 
     # Summarize cell metrics
     cell_summary = []
+    # Ensure coordinates are numeric
+    df_filtered["x_location"] = pd.to_numeric(df_filtered["x_location"], errors='coerce')
+    df_filtered["y_location"] = pd.to_numeric(df_filtered["y_location"], errors='coerce')
+    
     for cell_id, cell_data in df_filtered.groupby(cell_id_col):
         if len(cell_data) < min_transcripts:
             continue
-        cell_convex_hull = ConvexHull(cell_data[["x_location", "y_location"]], qhull_options="QJ")
-        cell_area = cell_convex_hull.area
+        
+        # Use physical coordinates for centroid
+        cx = cell_data["x_location"].mean()
+        cy = cell_data["y_location"].mean()
+        
+        try:
+            cell_convex_hull = ConvexHull(cell_data[["x_location", "y_location"]], qhull_options="QJ")
+            cell_area = cell_convex_hull.area
+        except Exception:
+            cell_area = 0 # Fallback for degenerate cases
+            
         if cell_area < min_cell_area or cell_area > max_cell_area:
             continue
+            
         cell_summary.append(
             {
                 "cell": cell_id,
-                "cell_centroid_x": cell_data["x_location"].mean(),
-                "cell_centroid_y": cell_data["y_location"].mean(),
+                "cell_centroid_x": cx,
+                "cell_centroid_y": cy,
                 "cell_area": cell_area,
             }
         )
